@@ -20,11 +20,10 @@
 #ifndef GCC_Z80_H
 #define GCC_Z80_H
 
-#include "target-def.h"
-
 #define SLOW_BYTE_ACCESS 0
 
 #define ASM_OUTPUT_ALIGN(FILE, POWER) fprintf ((FILE), "\t.align %d\n", (POWER))
+#define GLOBAL_ASM_OP "\t.globl "
 
 #define ASM_APP_ON ""
 #define ASM_APP_OFF ""

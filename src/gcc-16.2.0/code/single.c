@@ -3,7 +3,7 @@
 // require initialization/startup code as well and this test should be the
 // absolute minimum.
 unsigned char
-foo (void)
+example (void)
 {
   return 42;
 }

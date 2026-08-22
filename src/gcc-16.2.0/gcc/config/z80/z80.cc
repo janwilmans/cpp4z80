@@ -51,6 +51,43 @@ z80_legitimate_address_p (machine_mode mode, rtx x, bool strict, code_helper)
   return CONSTANT_ADDRESS_P (x) || REG_P (x);
 }
 
+static void
+z80_print_operand (FILE *file, rtx x, int code)
+{
+  if (code != 0)
+    {
+      output_operand_lossage ("invalid operand modifier");
+      return;
+    }
+
+  switch (GET_CODE (x))
+    {
+    case REG:
+      fprintf (file, "%s", reg_names[REGNO (x)]);
+      return;
+
+    case CONST_INT:
+      fprintf (file, "%ld", (long) INTVAL (x));
+      return;
+
+    default:
+      output_operand_lossage ("unsupported operand");
+      return;
+    }
+}
+
+#undef TARGET_PRINT_OPERAND
+#define TARGET_PRINT_OPERAND z80_print_operand
+
+static void
+z80_function_epilogue (FILE *file	)
+{
+  fprintf (file, "\tret\n");
+}
+
+#undef TARGET_ASM_FUNCTION_EPILOGUE
+#define TARGET_ASM_FUNCTION_EPILOGUE z80_function_epilogue
+
 #undef TARGET_FUNCTION_ARG
 #define TARGET_FUNCTION_ARG z80_function_arg
 

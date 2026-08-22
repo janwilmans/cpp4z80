@@ -1,0 +1,10 @@
+{
+    "folders": [
+        {
+            "path": "src/gcc-16.2.0"
+        }
+    ],
+    "settings": {
+        "C_Cpp.clang_format_path": "/usr/local/bin/clang-format-7"
+    }
+}

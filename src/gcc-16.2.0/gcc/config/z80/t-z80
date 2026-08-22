@@ -1,1 +1,3 @@
 # Z80 target
+
+md_file = $(srcdir)/config/z80/z80.md

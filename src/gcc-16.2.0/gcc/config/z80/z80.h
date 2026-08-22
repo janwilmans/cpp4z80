@@ -25,6 +25,10 @@
 #define ASM_OUTPUT_ALIGN(FILE, POWER) fprintf ((FILE), "\t.align %d\n", (POWER))
 #define GLOBAL_ASM_OP "\t.globl "
 
+#define TEXT_SECTION_ASM_OP "\t.text"
+#define DATA_SECTION_ASM_OP "\t.data"
+#define BSS_SECTION_ASM_OP "\t.bss"
+
 #define ASM_APP_ON ""
 #define ASM_APP_OFF ""
 
@@ -152,7 +156,9 @@ typedef unsigned int CUMULATIVE_ARGS;
 #define PARM_BOUNDARY 8
 
 #define STACK_GROWS_DOWNWARD 1
-#define FRAME_GROWS_DOWNWARD 1
+
+// jcw: investigate when/if this should be 1
+#define FRAME_GROWS_DOWNWARD 0
 
 #define FIRST_PARM_OFFSET(FNDECL) 0
 
@@ -168,9 +174,9 @@ typedef unsigned int CUMULATIVE_ARGS;
 
 #define POINTERS_EXTEND_UNSIGNED 1
 
-#define FRAME_POINTER_REGNUM 13
+#define FRAME_POINTER_REGNUM H_REG
 
-#define ARG_POINTER_REGNUM 13
+#define ARG_POINTER_REGNUM H_REG
 
 #define STATIC_CHAIN_REGNUM 2
 
@@ -179,6 +185,10 @@ typedef unsigned int CUMULATIVE_ARGS;
 #define LIBCALL_VALUE(MODE) gen_rtx_REG ((MODE), A_REG)
 
 #define FUNCTION_ARG_REGNO_P(REGNO) 0
+
+#define FUNCTION_VALUE(TYPE, FUNC) gen_rtx_REG (TYPE_MODE (TYPE), A_REG)
+
+#define TARGET_LEGITIMATE_ADDRESS_P z80_legitimate_address_p
 
 /*
  * Register classes.

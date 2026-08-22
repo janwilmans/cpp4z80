@@ -45,6 +45,12 @@ z80_functions_b_resolvable_from_a (tree a, tree b, tree c)
   return false;
 }
 
+static bool
+z80_legitimate_address_p (machine_mode mode, rtx x, bool strict, code_helper)
+{
+  return CONSTANT_ADDRESS_P (x) || REG_P (x);
+}
+
 #undef TARGET_FUNCTION_ARG
 #define TARGET_FUNCTION_ARG z80_function_arg
 

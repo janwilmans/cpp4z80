@@ -40,6 +40,8 @@ extern const char *z80_output_prologue (rtx *operands);
 extern const char *z80_output_sp_adjust (HOST_WIDE_INT delta);
 extern bool z80_q_memory_p (rtx op);
 extern bool z80_abs_memory_p (rtx op);
+extern void z80_final_prescan_insn (rtx_insn *insn, rtx *operands,
+				    int noperands);
 #endif
 
 #endif /* GCC_Z80_PROTOS_H */

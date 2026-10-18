@@ -15,6 +15,16 @@ tests/run_tests.py -v -O 0 tests/c/007_stack_args.c   # one test, show asm
 
 Build products (assembly, map files, binaries) go to `work/test-out/`.
 
+Support code linked into every test program:
+
+- `support/crt0.s` - sets SP, runs C++ global constructors (`.ctors`,
+  `.init_array`), calls `main` and halts.
+- `src/gcc-16.2.0/libgcc/config/z80/lib1funcs.S` - multiply/divide/shift
+  helpers that the compiler calls (`__mulhi3`, `__divsi3`, ...).
+- `support/libc.s` - `memcpy`, `memmove`, `memset`, `memcmp`, which GCC may
+  call implicitly (e.g. for struct copies).
+- `support/z80.ld` - flat 64K memory layout.
+
 Functions under test are marked `__attribute__ ((noipa))` so that GCC really
 calls them instead of folding the whole program into a constant.
 

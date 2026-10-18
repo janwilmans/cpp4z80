@@ -172,34 +172,39 @@ z80_access_size (machine_mode mode)
   return size > 0 ? size : 1;
 }
 
-/* Return true if (BASE + OFFSET) is a valid indexed address for an access
-   of SIZE bytes, i.e. maps onto (ix+d) with every byte addressable.  */
+/* Return true if an access of SIZE bytes at displacement OFFSET can be
+   encoded directly as (ix+d), i.e. every byte is within -128..127.  */
 
 static bool
-z80_indexed_address_p (rtx base, HOST_WIDE_INT offset, HOST_WIDE_INT size,
-		       bool strict)
+z80_short_displacement_p (HOST_WIDE_INT offset, HOST_WIDE_INT size)
 {
-  if (!REG_P (base))
+  return offset >= -128 && offset + size - 1 <= 127;
+}
+
+/* Return true if (BASE + OFFSET) is a valid indexed address.  The base must
+   be IX (or one of the registers that are eliminated into IX).
+
+   Any 16-bit displacement is accepted: displacements outside -128..127 are
+   handled when the insn is output, by pointing IY at the location first
+   (see z80_final_prescan_insn).  Rejecting them would force the address
+   into HL, the only other pointer register, which is often not free.  */
+
+static bool
+z80_indexed_address_p (rtx base, HOST_WIDE_INT offset, bool strict)
+{
+  if (!REG_P (base) || !IN_RANGE (offset, -32768, 32767))
     return false;
 
   unsigned int regno = REGNO (base);
   if (regno >= FIRST_PSEUDO_REGISTER)
-    {
-      /* The virtual frame/argument registers are replaced by the soft
-	 frame/argument pointers, which in turn are eliminated into IX.
-	 Any other pseudo cannot become IX (IX is fixed), so it can only
-	 ever be used as (hl), which has no displacement.  */
-      return (!strict && regno >= FIRST_VIRTUAL_REGISTER
-	      && regno <= LAST_VIRTUAL_REGISTER
-	      && offset >= -128 && offset + size - 1 <= 127);
-    }
+    /* The virtual frame/argument registers are replaced by the soft
+       frame/argument pointers, which in turn are eliminated into IX.
+       Any other pseudo cannot become IX (IX is fixed), so it can only
+       ever be used as (hl), which has no displacement.  */
+    return (!strict && regno >= FIRST_VIRTUAL_REGISTER
+	    && regno <= LAST_VIRTUAL_REGISTER);
 
-  if (regno == AP_REG)
-    offset += 4;
-  else if (regno != FP_REG && regno != IXL_REG)
-    return false;
-
-  return offset >= -128 && offset + size - 1 <= 127;
+  return regno == AP_REG || regno == FP_REG || regno == IXL_REG;
 }
 
 /* Implement TARGET_LEGITIMATE_ADDRESS_P.
@@ -207,7 +212,8 @@ z80_indexed_address_p (rtx base, HOST_WIDE_INT offset, HOST_WIDE_INT size,
    Valid addresses are:
 
      (hl)          (reg HL)
-     (ix+d)        (plus (reg IX) (const_int d)), -128 <= d <= 127
+     (ix+d)        (plus (reg IX) (const_int d)); d outside -128..127 is
+		   output through IY
      (nn)          a constant address
 
    Push addresses (pre_dec sp) only appear inside the explicit push
@@ -215,11 +221,9 @@ z80_indexed_address_p (rtx base, HOST_WIDE_INT offset, HOST_WIDE_INT size,
    patterns never match a push.  */
 
 static bool
-z80_legitimate_address_p (machine_mode mode, rtx x, bool strict,
+z80_legitimate_address_p (machine_mode, rtx x, bool strict,
 			  code_helper = ERROR_MARK)
 {
-  HOST_WIDE_INT size = z80_access_size (mode);
-
   switch (GET_CODE (x))
     {
     case REG:
@@ -227,7 +231,7 @@ z80_legitimate_address_p (machine_mode mode, rtx x, bool strict,
 
     case PLUS:
       if (CONST_INT_P (XEXP (x, 1)))
-	return z80_indexed_address_p (XEXP (x, 0), INTVAL (XEXP (x, 1)), size,
+	return z80_indexed_address_p (XEXP (x, 0), INTVAL (XEXP (x, 1)),
 				      strict);
       return false;
 
@@ -255,7 +259,6 @@ z80_q_memory_p (rtx op)
     return false;
 
   rtx addr = XEXP (op, 0);
-  HOST_WIDE_INT size = z80_access_size (GET_MODE (op));
 
   if (REG_P (addr))
     {
@@ -268,7 +271,7 @@ z80_q_memory_p (rtx op)
 
   if (GET_CODE (addr) == PLUS && CONST_INT_P (XEXP (addr, 1)))
     return z80_indexed_address_p (XEXP (addr, 0), INTVAL (XEXP (addr, 1)),
-				  size, false);
+				  false);
 
   return false;
 }
@@ -334,6 +337,58 @@ z80_containing_pair_name (unsigned int regno)
     }
 }
 
+/* The out-of-range (ix+d) address of the insn being output, and the
+   displacement that IY has been set to point at (relative to IX).  Set by
+   z80_final_prescan_insn.  */
+
+static rtx z80_far_addr;
+static HOST_WIDE_INT z80_far_base;
+
+/* Implement FINAL_PRESCAN_INSN.
+
+   If one of the operands of INSN is an (ix+d) memory reference whose
+   displacement does not fit in a signed byte, emit code that points IY at
+   IX+d first; the operand is then printed as (iy+0) / (iy+1).  IY is a
+   fixed scratch register that is never live between insns, and the
+   sequence preserves all other registers.  */
+
+void
+z80_final_prescan_insn (rtx_insn *, rtx *operands, int noperands)
+{
+  z80_far_addr = NULL_RTX;
+
+  for (int i = 0; i < noperands; i++)
+    {
+      rtx op = operands[i];
+      if (!op || !MEM_P (op))
+	continue;
+
+      rtx addr = XEXP (op, 0);
+      if (GET_CODE (addr) != PLUS
+	  || !REG_P (XEXP (addr, 0))
+	  || REGNO (XEXP (addr, 0)) != IXL_REG
+	  || !CONST_INT_P (XEXP (addr, 1)))
+	continue;
+
+      HOST_WIDE_INT disp = INTVAL (XEXP (addr, 1));
+      if (z80_short_displacement_p (disp, z80_access_size (GET_MODE (op))))
+	continue;
+
+      if (z80_far_addr)
+	{
+	  /* All far references of one insn must be reachable from the
+	     same IY value.  */
+	  gcc_assert (rtx_equal_p (addr, z80_far_addr));
+	  continue;
+	}
+
+      z80_far_addr = addr;
+      z80_far_base = disp;
+      fprintf (asm_out_file, "\tpush\tix\n\tpop\tiy\n\tpush\tbc\n"
+	       "\tld\tbc,%d\n\tadd\tiy,bc\n\tpop\tbc\n", (int) disp);
+    }
+}
+
 /* Print the memory address ADDR, displaced by OFFSET bytes.  */
 
 static void
@@ -353,8 +408,11 @@ z80_print_address (FILE *file, rtx addr, HOST_WIDE_INT offset)
       unsigned int regno = REGNO (base);
       if (regno == L_REG && disp == 0)
 	fputs ("(hl)", file);
-      else if (regno == IXL_REG || regno == IYL_REG)
-	fprintf (file, "(%s%+d)", z80_pair_name (regno), (int) disp);
+      else if (regno == IXL_REG && z80_far_addr
+	       && rtx_equal_p (addr, z80_far_addr))
+	fprintf (file, "(iy%+d)", (int) (disp - z80_far_base));
+      else if (regno == IXL_REG && IN_RANGE (disp, -128, 127))
+	fprintf (file, "(ix%+d)", (int) disp);
       else
 	output_operand_lossage ("invalid Z80 address");
       return;
@@ -984,7 +1042,8 @@ z80_can_eliminate (const int, const int to)
 }
 
 /* Implement INITIAL_ELIMINATION_OFFSET.  IX points at the saved IX; the
-   return address sits above it and the stack arguments above that.  */
+   return address sits above it and the stack arguments above that.  The
+   local variables grow downwards from IX.  */
 
 HOST_WIDE_INT
 z80_initial_elimination_offset (int from, int to)

@@ -68,7 +68,8 @@ def support_objects(outdir):
     Returns [crt0.o, runtime objects...]; crt0.o must be linked first."""
     objs = []
     for src in (os.path.join(SUPPORT, "crt0.s"),
-                os.path.join(LIBGCC_Z80, "lib1funcs.S")):
+                os.path.join(LIBGCC_Z80, "lib1funcs.S"),
+                os.path.join(SUPPORT, "libc.s")):
         name = os.path.basename(src)
         obj = os.path.join(outdir, os.path.splitext(name)[0] + ".o")
         run([AS, "-o", obj, src], "assemble " + name)
@@ -118,7 +119,8 @@ def run_test(path, opt, support):
         cflags += ["-fno-exceptions", "-fno-rtti"]
     run(XGCC + ["-x", lang, "-S", "-o", asm] + cflags + [path], "compile")
     run([AS, "-o", obj, asm], "assemble")
-    run([LD, "-T", os.path.join(SUPPORT, "z80.ld"), "-o", elf,
+    run([LD, "--no-warn-rwx-segments", "-T", os.path.join(SUPPORT, "z80.ld"),
+         "-o", elf,
          "-Map", os.path.join(workdir, name + ".map")] + support[:1]
         + [obj] + support[1:], "link")
     run([OBJCOPY, "-O", "binary", elf, binfile], "objcopy")

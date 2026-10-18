@@ -106,8 +106,9 @@
   {"c", "b", "e", "d", "l", "h", "a", "ixl", "ixh", "iyl", "iyh", "sp",       \
    "?fp", "?ap"}
 
-/* IX is the hard frame pointer.  IY is reserved as a scratch register for
-   the prologue / stack adjustment / indirect call sequences.  SP and the
+/* IX is the hard frame pointer.  IY is reserved as a scratch register that
+   is only used inside single insns: the prologue, stack adjustments and
+   (ix+d) accesses whose displacement does not fit in a byte.  SP and the
    soft registers are fixed as usual.  */
 #define FIXED_REGISTERS                                                        \
   {                                                                            \
@@ -210,6 +211,10 @@ enum reg_class
 	           outgoing pushed arguments (sp)  */
 
 #define STACK_GROWS_DOWNWARD 1
+/* Locals are allocated downwards from IX, so that every elimination
+   offset is a constant.  (Growing upwards from a soft frame pointer below
+   IX would make the FP->IX offset depend on the frame size, which changes
+   while LRA allocates spill slots.)  */
 #define FRAME_GROWS_DOWNWARD 1
 #define FIRST_PARM_OFFSET(FNDECL) 0
 
@@ -292,6 +297,9 @@ typedef struct z80_args CUMULATIVE_ARGS;
 
 #undef GLOBAL_ASM_OP
 #define GLOBAL_ASM_OP "\t.globl\t"
+
+#define FINAL_PRESCAN_INSN(INSN, OPVEC, NOPERANDS)                             \
+  z80_final_prescan_insn ((INSN), (OPVEC), (NOPERANDS))
 
 #define ASM_OUTPUT_ALIGN(FILE, LOG)                                            \
   do                                                                           \

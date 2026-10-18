@@ -699,6 +699,42 @@ z80_output_addhi3 (rtx *operands)
   return "";
 }
 
+/* Output (set (reg D) (minus (reg D) OP2)) for the pairs BC/DE/HL.  Only
+   "sbc hl,rr" exists, so the other pairs go through HL.  */
+
+const char *
+z80_output_subhi3 (rtx *operands)
+{
+  rtx dst = operands[0];
+  rtx op2 = operands[2];
+
+  if (REGNO (op2) == REGNO (dst))
+    return "ld\t%0,0";
+
+  switch (REGNO (dst))
+    {
+    case L_REG:
+      return "or\ta\n\tsbc\thl,%2";
+
+    case E_REG:
+      /* After the swap DE holds what was in HL and vice versa.  */
+      if (REGNO (op2) == L_REG)
+	return "ex\tde,hl\n\tor\ta\n\tsbc\thl,de\n\tex\tde,hl";
+      return "ex\tde,hl\n\tor\ta\n\tsbc\thl,%2\n\tex\tde,hl";
+
+    case C_REG:
+      if (REGNO (op2) == L_REG)
+	return ("push\tde\n\tld\td,h\n\tld\te,l\n\tpush\thl\n\t"
+		"ld\th,b\n\tld\tl,c\n\tor\ta\n\tsbc\thl,de\n\t"
+		"ld\tb,h\n\tld\tc,l\n\tpop\thl\n\tpop\tde");
+      return ("push\thl\n\tld\th,b\n\tld\tl,c\n\tor\ta\n\t"
+	      "sbc\thl,%2\n\tld\tb,h\n\tld\tc,l\n\tpop\thl");
+
+    default:
+      gcc_unreachable ();
+    }
+}
+
 /* ------------------------------------------------------------------------- */
 /* Shifts                                                                    */
 /* ------------------------------------------------------------------------- */
@@ -787,6 +823,83 @@ z80_output_shift (enum rtx_code code, rtx *operands)
 /* Compare and branch                                                        */
 /* ------------------------------------------------------------------------- */
 
+/* Return the register that holds what was in REG after "ex de,hl".  */
+
+static rtx
+z80_swap_de_hl (rtx x)
+{
+  if (REG_P (x) && REGNO (x) == E_REG)
+    return gen_rtx_REG (HImode, L_REG);
+  if (REG_P (x) && REGNO (x) == L_REG)
+    return gen_rtx_REG (HImode, E_REG);
+  return x;
+}
+
+/* Output instructions that set the flags for HL - OP2 without changing
+   any register.  OP2 is a pair or a constant.
+
+   "add hl,rr" after "sbc hl,rr" restores HL without changing S, Z or
+   P/V, and sets C exactly when the subtraction borrowed, so afterwards
+   all flags still describe HL - OP2.  */
+
+static void
+z80_output_compare_hl (rtx op2)
+{
+  if (REG_P (op2) && REGNO (op2) == L_REG)
+    /* Comparing HL with itself: equal.  "cp a" gives Z=1, C=0, S=0, V=0.  */
+    output_asm_insn ("cp\ta", &op2);
+  else if (REG_P (op2))
+    output_asm_insn ("or\ta\n\tsbc\thl,%0\n\tadd\thl,%0", &op2);
+  else
+    output_asm_insn ("push\tde\n\tld\tde,%0\n\tor\ta\n\t"
+		     "sbc\thl,de\n\tadd\thl,de\n\tpop\tde", &op2);
+}
+
+/* Output instructions that set the flags for OP1 - OP2 (16-bit) without
+   changing any register.  OP1 is one of the pairs BC, DE, HL; OP2 a pair
+   or a constant.  Only HL can be compared directly, so other pairs are
+   swapped or copied into HL first ("ex", "push" and "pop" do not change
+   the flags).  */
+
+static void
+z80_output_compare_hi (rtx op1, rtx op2)
+{
+  if (REG_P (op2) && REGNO (op2) == REGNO (op1))
+    {
+      output_asm_insn ("cp\ta", &op2);
+      return;
+    }
+
+  switch (REGNO (op1))
+    {
+    case L_REG:
+      z80_output_compare_hl (op2);
+      break;
+
+    case E_REG:
+      output_asm_insn ("ex\tde,hl", &op1);
+      z80_output_compare_hl (z80_swap_de_hl (op2));
+      output_asm_insn ("ex\tde,hl", &op1);
+      break;
+
+    case C_REG:
+      if (REG_P (op2) && REGNO (op2) == L_REG)
+	output_asm_insn ("push\tde\n\tld\td,h\n\tld\te,l\n\tpush\thl\n\t"
+			 "ld\th,b\n\tld\tl,c\n\tor\ta\n\tsbc\thl,de\n\t"
+			 "pop\thl\n\tpop\tde", &op1);
+      else
+	{
+	  output_asm_insn ("push\thl\n\tld\th,b\n\tld\tl,c", &op1);
+	  z80_output_compare_hl (op2);
+	  output_asm_insn ("pop\thl", &op1);
+	}
+      break;
+
+    default:
+      gcc_unreachable ();
+    }
+}
+
 /* Output a compare-and-branch.  Operand 0 is the comparison, operands 1 and
    2 the values compared and operand 3 the target label.  If REVERSED, the
    jump is taken when the comparison is false.
@@ -805,14 +918,8 @@ z80_output_cbranch (rtx *operands, bool reversed)
 
   if (GET_MODE (operands[1]) == QImode)
     output_asm_insn ("cp\t%2", operands);
-  else if (CONST_INT_P (operands[2]) || !REG_P (operands[2]))
-    /* HL against a constant: use DE as temporary.  "add hl,de" restores
-       HL without changing S, Z, P/V; it sets C exactly when the
-       subtraction borrowed, so all flags still describe HL - DE.  */
-    output_asm_insn ("push\tde\n\tld\tde,%2\n\tor\ta\n\t"
-		     "sbc\thl,de\n\tadd\thl,de\n\tpop\tde", operands);
   else
-    output_asm_insn ("or\ta\n\tsbc\thl,%2\n\tadd\thl,%2", operands);
+    z80_output_compare_hi (operands[1], operands[2]);
 
   switch (code)
     {

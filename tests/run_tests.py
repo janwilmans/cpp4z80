@@ -58,14 +58,19 @@ def run(cmd, stage):
     return proc
 
 
+LIBGCC_Z80 = os.path.join(ROOT, "src", "gcc-16.2.0", "libgcc", "config",
+                          "z80")
+
+
 def support_objects(outdir):
-    """Assemble crt0.s and runtime.s (if present) once."""
+    """Assemble crt0.s and the runtime routines once.
+
+    Returns [crt0.o, runtime objects...]; crt0.o must be linked first."""
     objs = []
-    for name in ("crt0.s", "runtime.s"):
-        src = os.path.join(SUPPORT, name)
-        if not os.path.exists(src):
-            continue
-        obj = os.path.join(outdir, name.replace(".s", ".o"))
+    for src in (os.path.join(SUPPORT, "crt0.s"),
+                os.path.join(LIBGCC_Z80, "lib1funcs.S")):
+        name = os.path.basename(src)
+        obj = os.path.join(outdir, os.path.splitext(name)[0] + ".o")
         run([AS, "-o", obj, src], "assemble " + name)
         objs.append(obj)
     return objs

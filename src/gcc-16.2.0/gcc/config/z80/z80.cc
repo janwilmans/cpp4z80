@@ -1460,9 +1460,66 @@ z80_push_rounding (poly_int64 bytes)
   return (bytes.to_constant () + 1) & ~1;
 }
 
+/* Return true if the current function has the attribute NAME.  */
+
+static bool
+z80_function_attribute_p (const char *name)
+{
+  return (current_function_decl
+	  && lookup_attribute (name, DECL_ATTRIBUTES (current_function_decl)));
+}
+
+static bool
+z80_naked_function_p (void)
+{
+  return z80_function_attribute_p ("naked");
+}
+
+/* Interrupt handlers ("interrupt" for maskable interrupts, "nmi" for the
+   non-maskable one) must preserve every register they change.  */
+
+static bool
+z80_interrupt_function_p (void)
+{
+  return (z80_function_attribute_p ("interrupt")
+	  || z80_function_attribute_p ("nmi"));
+}
+
+/* Bits of the register-save mask used by the z80_save_regs and
+   z80_restore_regs insns.  */
+#define Z80_SAVE_AF 1
+#define Z80_SAVE_BC 2
+#define Z80_SAVE_DE 4
+#define Z80_SAVE_HL 8
+#define Z80_SAVE_IY 16
+
+/* Return the registers an interrupt handler must save: those it uses, or
+   all call-clobbered registers if it calls other functions.  AF and IY
+   (which many insns use as scratch without saying so) are always
+   saved.  */
+
+static int
+z80_interrupt_save_mask (void)
+{
+  int mask = Z80_SAVE_AF | Z80_SAVE_IY;
+  bool calls = !crtl->is_leaf;
+
+  if (calls || df_regs_ever_live_p (C_REG) || df_regs_ever_live_p (B_REG))
+    mask |= Z80_SAVE_BC;
+  if (calls || df_regs_ever_live_p (E_REG) || df_regs_ever_live_p (D_REG))
+    mask |= Z80_SAVE_DE;
+  if (calls || df_regs_ever_live_p (L_REG) || df_regs_ever_live_p (H_REG))
+    mask |= Z80_SAVE_HL;
+  return mask;
+}
+
 void
 z80_expand_prologue (void)
 {
+  if (z80_naked_function_p ())
+    return;
+  if (z80_interrupt_function_p ())
+    emit_insn (gen_z80_save_regs (GEN_INT (z80_interrupt_save_mask ())));
   if (z80_frame_needed_p ())
     emit_insn (gen_z80_prologue (GEN_INT (get_frame_size ())));
 }
@@ -1470,10 +1527,88 @@ z80_expand_prologue (void)
 void
 z80_expand_epilogue (void)
 {
+  if (z80_naked_function_p ())
+    return;
   if (z80_frame_needed_p ())
     emit_insn (gen_z80_epilogue ());
-  emit_jump_insn (gen_z80_return ());
+  if (z80_interrupt_function_p ())
+    {
+      emit_insn (gen_z80_restore_regs (GEN_INT (z80_interrupt_save_mask ())));
+      if (z80_function_attribute_p ("nmi"))
+	emit_jump_insn (gen_z80_return_nmi ());
+      else
+	emit_jump_insn (gen_z80_return_interrupt ());
+    }
+  else
+    emit_jump_insn (gen_z80_return ());
 }
+
+/* Output the pushes (SAVE) or pops (!SAVE) for the register-save MASK.  */
+
+const char *
+z80_output_save_regs (rtx mask_rtx, bool save)
+{
+  static const char *const names[] = { "af", "bc", "de", "hl", "iy" };
+  int mask = INTVAL (mask_rtx);
+  char buf[16];
+
+  for (int i = 0; i < 5; i++)
+    {
+      int r = save ? i : 4 - i;
+      if (mask & (1 << r))
+	{
+	  snprintf (buf, sizeof buf, "%s\t%s", save ? "push" : "pop", names[r]);
+	  output_asm_insn (buf, NULL);
+	}
+    }
+  return "";
+}
+
+/* Implement TARGET_WARN_FUNC_RETURN: a naked function returns through
+   its own inline assembly.  */
+
+static bool
+z80_warn_func_return (tree decl)
+{
+  return !lookup_attribute ("naked", DECL_ATTRIBUTES (decl));
+}
+
+/* Implement TARGET_ALLOCATE_STACK_SLOTS_FOR_ARGS: a naked function has no
+   frame to put them in.  */
+
+static bool
+z80_allocate_stack_slots_for_args (void)
+{
+  return !z80_naked_function_p ();
+}
+
+/* Handle the "interrupt", "nmi" and "naked" attributes: they only apply
+   to functions.  */
+
+static tree
+z80_handle_fndecl_attribute (tree *node, tree name, tree, int,
+			     bool *no_add_attrs)
+{
+  if (TREE_CODE (*node) != FUNCTION_DECL)
+    {
+      warning (OPT_Wattributes, "%qE attribute only applies to functions",
+	       name);
+      *no_add_attrs = true;
+    }
+  return NULL_TREE;
+}
+
+TARGET_GNU_ATTRIBUTES (z80_attribute_table,
+{
+  /* { name, min_len, max_len, decl_req, type_req, fn_type_req,
+       affects_type_identity, handler, exclude } */
+  { "interrupt", 0, 0, true, false, false, false,
+    z80_handle_fndecl_attribute, NULL },
+  { "nmi", 0, 0, true, false, false, false,
+    z80_handle_fndecl_attribute, NULL },
+  { "naked", 0, 0, true, false, false, false,
+    z80_handle_fndecl_attribute, NULL }
+});
 
 /* Output a sequence that adds DELTA to SP without touching any allocatable
    register.  */
@@ -1783,6 +1918,13 @@ z80_scalar_mode_supported_p (scalar_mode mode)
 
 #undef TARGET_PRINT_OPERAND_ADDRESS
 #define TARGET_PRINT_OPERAND_ADDRESS z80_print_operand_address
+
+#undef TARGET_ATTRIBUTE_TABLE
+#define TARGET_ATTRIBUTE_TABLE z80_attribute_table
+#undef TARGET_WARN_FUNC_RETURN
+#define TARGET_WARN_FUNC_RETURN z80_warn_func_return
+#undef TARGET_ALLOCATE_STACK_SLOTS_FOR_ARGS
+#define TARGET_ALLOCATE_STACK_SLOTS_FOR_ARGS z80_allocate_stack_slots_for_args
 
 #undef TARGET_FRAME_POINTER_REQUIRED
 #define TARGET_FRAME_POINTER_REQUIRED z80_frame_pointer_required

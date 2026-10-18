@@ -39,6 +39,7 @@ extern const char *z80_output_subhi3 (rtx *operands);
 extern const char *z80_output_shift (enum rtx_code code, rtx *operands);
 extern const char *z80_output_cbranch (rtx *operands, bool hi);
 extern const char *z80_output_prologue (rtx *operands);
+extern const char *z80_output_save_regs (rtx mask, bool save);
 extern const char *z80_output_sp_adjust (HOST_WIDE_INT delta);
 extern bool z80_q_memory_p (rtx op);
 extern bool z80_abs_memory_p (rtx op);

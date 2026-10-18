@@ -13,3 +13,7 @@ LIB2ADDEHSHARED =
 LIB2_DIVMOD_EXCEPTION_FLAGS = -fno-exceptions -fno-non-call-exceptions
 
 HOST_LIBGCC2_CFLAGS += -Os -Dinhibit_libc
+
+# Default start-up file (see STARTFILE_SPEC in gcc/config/z80/z80.h).
+crt0.o: $(srcdir)/config/z80/crt0.S
+	$(gcc_compile) -c $<

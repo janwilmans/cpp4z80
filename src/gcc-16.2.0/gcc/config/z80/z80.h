@@ -33,6 +33,17 @@
   while (0)
 
 /* ------------------------------------------------------------------------- */
+/* Driver                                                                    */
+/* ------------------------------------------------------------------------- */
+
+/* Link the default start-up code from libgcc (crt0.S).  There are no
+   crtbegin/crtend files: constructors use .init_array.  */
+#undef STARTFILE_SPEC
+#define STARTFILE_SPEC "crt0.o%s"
+#undef ENDFILE_SPEC
+#define ENDFILE_SPEC ""
+
+/* ------------------------------------------------------------------------- */
 /* Storage layout                                                            */
 /* ------------------------------------------------------------------------- */
 

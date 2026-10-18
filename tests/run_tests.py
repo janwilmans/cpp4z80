@@ -11,9 +11,10 @@ levels it is run at:
 
     // opts: -O0 -O2
 
-Each test is compiled with the freshly built cross compiler, assembled and
-linked with the z80-elf binutils together with tests/support/crt0.s,
-tests/support/libc.s and libgcc.a, and run in the `z80` Python emulator.
+Each test is compiled with the freshly built cross compiler, assembled with
+the z80-elf binutils and linked through the compiler driver (crt0.o and
+libgcc.a from the libgcc build, the default linker script) together with
+tests/support/libc.s, and run in the `z80` Python emulator.
 
 Usage:  tests/run_tests.py [-v] [-O LEVEL ...] [test files...]
 """
@@ -22,6 +23,7 @@ import argparse
 import glob
 import os
 import re
+import struct
 import subprocess
 import sys
 
@@ -34,8 +36,6 @@ OUT = os.path.join(ROOT, "work", "test-out")
 
 XGCC = [os.path.join(GCC_BUILD, "xgcc"), "-B" + GCC_BUILD + "/"]
 AS = os.path.join(BINUTILS, "z80-elf-as")
-LD = os.path.join(BINUTILS, "z80-elf-ld")
-OBJCOPY = os.path.join(BINUTILS, "z80-elf-objcopy")
 
 DEFAULT_OPTS = ["-O0", "-O1", "-O2", "-Os"]
 MAX_TICKS = 20_000_000
@@ -58,25 +58,33 @@ def run(cmd, stage):
     return proc
 
 
-LIBGCC = os.path.join(ROOT, "src", "build-z80", "z80-elf", "libgcc",
-                      "libgcc.a")
+LIBGCC_DIR = os.path.join(ROOT, "src", "build-z80", "z80-elf", "libgcc")
 
 
 def support_objects(outdir):
-    """Assemble crt0.s and the test libc once.
-
-    Returns [crt0.o, other objects and libraries...]; crt0.o must be
-    linked first and libgcc.a last."""
-    if not os.path.exists(LIBGCC):
+    """Assemble the test libc once (until there is a real C library)."""
+    if not os.path.exists(os.path.join(LIBGCC_DIR, "libgcc.a")):
         sys.exit("libgcc.a not found: run scripts/make-libgcc.sh")
-    objs = []
-    for src in (os.path.join(SUPPORT, "crt0.s"),
-                os.path.join(SUPPORT, "libc.s")):
-        name = os.path.basename(src)
-        obj = os.path.join(outdir, os.path.splitext(name)[0] + ".o")
-        run([AS, "-o", obj, src], "assemble " + name)
-        objs.append(obj)
-    return objs + [LIBGCC]
+    obj = os.path.join(outdir, "libc.o")
+    run([AS, "-o", obj, os.path.join(SUPPORT, "libc.s")], "assemble libc.s")
+    return [obj]
+
+
+def load_elf(path):
+    """Return (memory image, entry point) from the PT_LOAD segments."""
+    data = open(path, "rb").read()
+    entry, phoff = struct.unpack_from("<II", data, 0x18)
+    phentsize, phnum = struct.unpack_from("<HH", data, 0x2a)
+    # Fill memory with garbage so that a missing .bss clear or a read of
+    # uninitialised memory does not go unnoticed.
+    memory = bytearray(b"\xa5" * 0x10000)
+    for i in range(phnum):
+        (p_type, p_offset, _vaddr, p_paddr, p_filesz, _memsz, _flags,
+         _align) = struct.unpack_from("<8I", data, phoff + i * phentsize)
+        if p_type == 1 and p_filesz:
+            memory[p_paddr:p_paddr + p_filesz] = \
+                data[p_offset:p_offset + p_filesz]
+    return bytes(memory), entry
 
 
 def parse_spec(path):
@@ -90,11 +98,13 @@ def parse_spec(path):
     return expect, opts
 
 
-def execute(binary):
+def execute(elf):
     import z80
 
+    memory, entry = load_elf(elf)
     machine = z80.Z80Machine()
-    machine.set_memory_block(0, binary)
+    machine.set_memory_block(0, memory)
+    machine.pc = entry
     # run() also returns on internal events (e.g. the end of a video
     # frame), so keep going until HALT or until the tick budget is spent.
     machine.ticks_to_stop = MAX_TICKS
@@ -114,20 +124,19 @@ def run_test(path, opt, support):
     asm = os.path.join(workdir, name + ".s")
     obj = os.path.join(workdir, name + ".o")
     elf = os.path.join(workdir, name + ".elf")
-    binfile = os.path.join(workdir, name + ".bin")
 
     cflags = [opt, "-ffreestanding", "-fno-builtin"]
     if lang == "c++":
         cflags += ["-fno-exceptions", "-fno-rtti"]
     run(XGCC + ["-x", lang, "-S", "-o", asm] + cflags + [path], "compile")
     run([AS, "-o", obj, asm], "assemble")
-    run([LD, "--no-warn-rwx-segments", "-T", os.path.join(SUPPORT, "z80.ld"),
-         "-o", elf,
-         "-Map", os.path.join(workdir, name + ".map")] + support[:1]
-        + [obj] + support[1:], "link")
-    run([OBJCOPY, "-O", "binary", elf, binfile], "objcopy")
-    with open(binfile, "rb") as f:
-        return execute(f.read()), asm
+    # Link through the compiler driver: crt0.o and libgcc.a come from the
+    # libgcc build directory, the default linker script is used.
+    run(XGCC + ["-B" + LIBGCC_DIR + "/", "-L" + LIBGCC_DIR, "-nolibc",
+                "-Wl,--no-warn-rwx-segments",
+                "-Wl,-Map," + os.path.join(workdir, name + ".map"),
+                "-o", elf, obj] + support, "link")
+    return execute(elf), asm
 
 
 def ensure_emulator():

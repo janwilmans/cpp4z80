@@ -16,16 +16,21 @@ tests/run_tests.py -v -O 0 tests/c/007_stack_args.c   # one test, show asm
 
 Build products (assembly, map files, binaries) go to `work/test-out/`.
 
-Support code linked into every test program:
+Programs are linked through the compiler driver, exactly as a user would
+link them (with `-nolibc`, as there is no C library yet):
 
-- `support/crt0.s` - sets SP, runs C++ global constructors (`.ctors`,
-  `.init_array`), calls `main` and halts.
+- `crt0.o` (libgcc, `src/gcc-16.2.0/libgcc/config/z80/crt0.S`) - sets SP,
+  clears `.bss`, runs constructors (`.init_array`), calls `main` and halts
+  in `_exit`.
 - `libgcc.a` - built by `scripts/make-libgcc.sh`: the assembly helpers from
-  `src/gcc-16.2.0/libgcc/config/z80/lib1funcs.S` (`__mulhi3`, `__divsi3`,
-  ...) plus the generic C routines (64-bit integers, soft float).
+  `lib1funcs.S` (`__mulhi3`, `__divsi3`, ...) plus the generic C routines
+  (64-bit integers, soft float).
 - `support/libc.s` - `memcpy`, `memmove`, `memset`, `memcmp`, which GCC may
   call implicitly (e.g. for struct copies).
-- `support/z80.ld` - flat 64K memory layout.
+- the default z80-elf linker script (program at 0x100).
+
+The emulator fills memory with 0xA5 before loading the program, so a missing
+`.bss` clear or a read of uninitialised memory shows up as a failure.
 
 Functions under test are marked `__attribute__ ((noipa))` so that GCC really
 calls them instead of folding the whole program into a constant.

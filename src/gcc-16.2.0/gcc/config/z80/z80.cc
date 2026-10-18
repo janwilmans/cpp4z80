@@ -1452,6 +1452,13 @@ z80_rtx_costs (rtx x, machine_mode mode, int outer_code, int,
 #undef TARGET_RETURN_IN_MEMORY
 #define TARGET_RETURN_IN_MEMORY z80_return_in_memory
 
+/* Constructors and destructors go into .init_array / .fini_array, which
+   crt0 walks (there are no crtbegin/crtend files).  */
+#undef TARGET_ASM_CONSTRUCTOR
+#define TARGET_ASM_CONSTRUCTOR default_elf_init_array_asm_out_constructor
+#undef TARGET_ASM_DESTRUCTOR
+#define TARGET_ASM_DESTRUCTOR default_elf_fini_array_asm_out_destructor
+
 #undef TARGET_ASM_ALIGNED_HI_OP
 #define TARGET_ASM_ALIGNED_HI_OP "\t.word\t"
 #undef TARGET_ASM_UNALIGNED_HI_OP

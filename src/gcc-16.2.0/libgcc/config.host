@@ -1551,7 +1551,7 @@ xstormy16-*-elf)
 	;;
 z80-*-elf*)
 	tmake_file="${tmake_file} z80/t-z80 t-fdpbit"
-	extra_parts=""
+	extra_parts="crt0.o"
 	;;
 xtensa*-*-elf*)
 	tmake_file="$tmake_file xtensa/t-xtensa xtensa/t-elf"

@@ -1,0 +1,4 @@
+install/
+work/
+src/build-*/
+src/*.log

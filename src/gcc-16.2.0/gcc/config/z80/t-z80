@@ -1,3 +1,1 @@
-# Z80 target
-
-md_file = $(srcdir)/config/z80/z80.md
+# Z80 target makefile fragment.

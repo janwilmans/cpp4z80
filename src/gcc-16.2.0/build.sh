@@ -5,7 +5,7 @@ cd ~/project/cpp4z80/src/build-z80
 ../gcc-16.2.0/configure \
     --prefix="$HOME/project/cpp4z80/install" \
     --target=z80-elf \
-    --enable-languages=c \
+    --enable-languages=c,c++ \
     --disable-nls \
     --disable-werror \
     CFLAGS="-O0 -g3" \

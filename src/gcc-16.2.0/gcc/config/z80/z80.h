@@ -313,6 +313,20 @@ typedef struct z80_args CUMULATIVE_ARGS;
 #undef GLOBAL_ASM_OP
 #define GLOBAL_ASM_OP "\t.globl\t"
 
+/* Jump tables for switch statements hold absolute 16-bit addresses.  They
+   need no alignment (elfos.h would align them to 4 bytes).  */
+#undef ASM_OUTPUT_BEFORE_CASE_LABEL
+#define ASM_OUTPUT_BEFORE_CASE_LABEL(FILE, PREFIX, NUM, TABLE)                 \
+  do                                                                           \
+    {                                                                          \
+    }                                                                          \
+  while (0)
+
+#define ASM_OUTPUT_ADDR_VEC_ELT(FILE, VALUE)                                   \
+  fprintf ((FILE), "\t.word\t.L%d\n", (VALUE))
+#define ASM_OUTPUT_ADDR_DIFF_ELT(FILE, BODY, VALUE, REL)                       \
+  fprintf ((FILE), "\t.word\t.L%d-.L%d\n", (VALUE), (REL))
+
 #define FINAL_PRESCAN_INSN(INSN, OPVEC, NOPERANDS)                             \
   z80_final_prescan_insn ((INSN), (OPVEC), (NOPERANDS))
 

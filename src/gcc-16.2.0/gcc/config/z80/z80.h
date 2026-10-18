@@ -178,7 +178,7 @@ enum reg_class
   IY_REGS,	/* y */
   SP_REGS,	/* k */
   GENERAL_REGS, /* r: A, B, C, D, E, H, L */
-  BASE_REGS,	/* HL, IX and the soft frame/argument pointers */
+  BASE_REGS,	/* BC, DE, HL, IX and the soft frame/argument pointers */
   ALL_REGS,
   LIM_REG_CLASSES
 };
@@ -205,7 +205,7 @@ enum reg_class
     {0x0600}, /* IY_REGS:      iyl iyh */                                      \
     {0x0800}, /* SP_REGS:      sp */                                           \
     {0x007f}, /* GENERAL_REGS: c b e d l h a */                                \
-    {0x31b0}, /* BASE_REGS:    l h ixl ixh ?fp ?ap */                          \
+    {0x31bf}, /* BASE_REGS:    bc de hl ix ?fp ?ap */                         \
     {0x3fff}  /* ALL_REGS */                                                   \
   }
 
@@ -323,6 +323,12 @@ typedef struct z80_args CUMULATIVE_ARGS;
 
 #undef GLOBAL_ASM_OP
 #define GLOBAL_ASM_OP "\t.globl\t"
+
+/* The z80 assembler does not accept \" in strings, which elfos.h uses.  */
+#undef ASM_OUTPUT_LIMITED_STRING
+#undef ASM_OUTPUT_ASCII
+#define ASM_OUTPUT_ASCII(FILE, STR, LENGTH)                                    \
+  z80_output_ascii ((FILE), (STR), (LENGTH))
 
 /* Jump tables for switch statements hold absolute 16-bit addresses.  They
    need no alignment (elfos.h would align them to 4 bytes).  */

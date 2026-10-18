@@ -22,6 +22,7 @@ extern enum reg_class z80_regno_reg_class (int regno);
 extern bool z80_regno_ok_for_base_p (int regno, bool strict);
 extern HOST_WIDE_INT z80_initial_elimination_offset (int from, int to);
 extern poly_int64 z80_push_rounding (poly_int64 bytes);
+extern void z80_output_ascii (FILE *file, const char *str, size_t length);
 
 extern void z80_expand_prologue (void);
 extern void z80_expand_epilogue (void);
@@ -30,6 +31,7 @@ extern void z80_expand_epilogue (void);
 extern void z80_init_cumulative_args (CUMULATIVE_ARGS *cum, tree fntype,
 				      rtx libname, tree fndecl);
 extern bool z80_move_ok_p (rtx dst, rtx src);
+extern void z80_expand_wide_move (rtx dst, rtx src);
 extern const char *z80_output_movqi (rtx *operands);
 extern const char *z80_output_movhi (rtx *operands);
 extern const char *z80_output_addhi3 (rtx *operands);

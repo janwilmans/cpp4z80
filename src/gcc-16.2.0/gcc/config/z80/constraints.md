@@ -45,10 +45,10 @@
 ;; Memory constraints
 ;; =========================================================================
 
-;; Memory that every 8-bit register can be loaded from / stored to:
-;; (hl) or (ix+d).
+;; Memory addressed by a register or IX+d: (hl), (ix+d), and (bc)/(de),
+;; which are output by redirecting the access through HL.
 (define_memory_constraint "Q"
-  "A memory operand addressed by HL or IX+d."
+  "A memory operand addressed by HL, BC, DE or IX+d."
   (and (match_code "mem")
        (match_test "z80_q_memory_p (op)")))
 

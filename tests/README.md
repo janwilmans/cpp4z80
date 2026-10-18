@@ -5,11 +5,15 @@ freshly built cross compiler at `-O0`, `-O1`, `-O2` and `-Os`, assembled and
 linked with the z80-elf binutils, and executed in an emulator (the `z80`
 Python package). The value returned by `main()` (read from HL after the
 program halts) must equal the value in the file's `// expect:` line.
+Optional `// output: text` lines give the expected console output (one line
+each), e.g. from `printf`.
 
 ```sh
 scripts/setup-test-env.sh      # once: binutils + emulator venv
 scripts/make-gcc.sh            # rebuild the compiler after backend changes
 scripts/make-libgcc.sh         # (re)build libgcc with that compiler
+scripts/install-gcc.sh         # install compiler + libgcc into install/
+scripts/build-newlib.sh        # build and install newlib (C library)
 tests/run_tests.py             # run everything
 tests/run_tests.py -v -O 0 tests/c/007_stack_args.c   # one test, show asm
 ```
@@ -17,7 +21,7 @@ tests/run_tests.py -v -O 0 tests/c/007_stack_args.c   # one test, show asm
 Build products (assembly, map files, binaries) go to `work/test-out/`.
 
 Programs are linked through the compiler driver, exactly as a user would
-link them (with `-nolibc`, as there is no C library yet):
+link them:
 
 - `crt0.o` (libgcc, `src/gcc-16.2.0/libgcc/config/z80/crt0.S`) - sets SP,
   clears `.bss`, runs constructors (`.init_array`), calls `main` and halts
@@ -25,8 +29,9 @@ link them (with `-nolibc`, as there is no C library yet):
 - `libgcc.a` - built by `scripts/make-libgcc.sh`: the assembly helpers from
   `lib1funcs.S` (`__mulhi3`, `__divsi3`, ...) plus the generic C routines
   (64-bit integers, soft float).
-- `support/libc.s` - `memcpy`, `memmove`, `memset`, `memcmp`, which GCC may
-  call implicitly (e.g. for struct copies).
+- newlib's `libc.a` / `libm.a` (built by `scripts/build-newlib.sh` with this
+  compiler), with `support/sys.c` as system layer: console output goes to
+  I/O port 1, which the emulator captures; the heap starts at `_end`.
 - the default z80-elf linker script (program at 0x100).
 
 The emulator fills memory with 0xA5 before loading the program, so a missing

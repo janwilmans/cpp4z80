@@ -12,6 +12,7 @@ cd "$BUILD" || exit 1
   --target=z80-elf \
   --disable-newlib-supplied-syscalls \
   --enable-newlib-nano-formatted-io \
+  --disable-newlib-wide-orient \
   --enable-newlib-nano-malloc \
   --enable-newlib-reent-small \
   --enable-lite-exit \

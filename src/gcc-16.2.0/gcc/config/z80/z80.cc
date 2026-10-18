@@ -84,8 +84,13 @@ z80_regno_reg_class (int regno)
     }
 }
 
-/* Return true if REGNO can be used as a base register: HL, IX, or one of
-   the soft frame/argument pointers (which are eliminated into IX).  */
+/* Return true if REGNO can be used as a base register: HL, BC, DE, IX, or
+   one of the soft frame/argument pointers (which are eliminated into IX).
+
+   Only HL (and IX) can really address memory for every instruction;
+   (bc) and (de) are output by temporarily redirecting the access through
+   HL (see z80_redirect_begin).  Offering three pointer registers instead
+   of one is what keeps LRA from running out of registers.  */
 
 bool
 z80_regno_ok_for_base_p (int regno, bool strict)
@@ -99,8 +104,8 @@ z80_regno_ok_for_base_p (int regno, bool strict)
       regno = reg_renumber[regno];
     }
 
-  return (regno == L_REG || regno == IXL_REG || regno == FP_REG
-	  || regno == AP_REG);
+  return (regno == L_REG || regno == C_REG || regno == E_REG
+	  || regno == IXL_REG || regno == FP_REG || regno == AP_REG);
 }
 
 /* Registers that hold a complete 16-bit value in ONE hard register.  */
@@ -147,6 +152,18 @@ z80_hard_regno_mode_ok (unsigned int regno, machine_mode mode)
     default:
       return false;
     }
+}
+
+/* Implement TARGET_CLASS_LIKELY_SPILLED_P.  All the small classes are:
+   there are only three allocatable register pairs, and HL is needed for
+   almost every memory access.  This stops combine from propagating hard
+   registers (e.g. a return value in HL) into insns that need HL for
+   something else, which LRA could not resolve.  */
+
+static bool
+z80_class_likely_spilled_p (reg_class_t rclass)
+{
+  return rclass != GENERAL_REGS && rclass != BASE_REGS && rclass != ALL_REGS;
 }
 
 /* Implement TARGET_MODES_TIEABLE_P.  */
@@ -248,9 +265,8 @@ z80_legitimate_address_p (machine_mode, rtx x, bool strict,
     }
 }
 
-/* Return true if OP is a memory reference that every 8-bit register can
-   use directly, i.e. its address is (hl) or (ix+d).  Used by the "Q"
-   constraint.  */
+/* Return true if OP is a memory reference with a register or (ix+d)
+   address: (hl), (bc), (de), (ix+d).  Used by the "Q" constraint.  */
 
 bool
 z80_q_memory_p (rtx op)
@@ -263,7 +279,7 @@ z80_q_memory_p (rtx op)
   if (REG_P (addr))
     {
       /* Before register allocation a pseudo address will be allocated to
-	 the base register class (HL).  */
+	 the base register class.  */
       if (REGNO (addr) >= FIRST_PSEUDO_REGISTER)
 	return !reload_completed;
       return z80_regno_ok_for_base_p (REGNO (addr), reload_completed);
@@ -337,6 +353,74 @@ z80_containing_pair_name (unsigned int regno)
     }
 }
 
+/* Memory addressed by BC or DE is accessed through HL:
+
+     (de):  ex de,hl  /  ...(hl)...  /  ex de,hl
+     (bc):  push hl / ld h,b / ld l,c  /  ...(hl)...  /  pop hl
+
+   None of these instructions change the flags.  While a (de) access is
+   redirected, D/E and H/L have swapped places, so register operands are
+   printed with swapped names.  The (bc) form must not be used by an insn
+   that writes H or L.  Z80_REDIRECT_BASE is the base register being
+   redirected (C_REG or E_REG), or -1.  */
+
+static int z80_redirect_base = -1;
+
+/* Return C_REG or E_REG if MEM is addressed by BC or DE, otherwise -1.  */
+
+static int
+z80_mem_redirect_base (rtx mem)
+{
+  if (!MEM_P (mem) || !REG_P (XEXP (mem, 0)))
+    return -1;
+  unsigned int regno = REGNO (XEXP (mem, 0));
+  return regno == C_REG || regno == E_REG ? (int) regno : -1;
+}
+
+/* Return the register that holds what REGNO holds while the current
+   redirection is active.  */
+
+static unsigned int
+z80_redirected_regno (unsigned int regno)
+{
+  if (z80_redirect_base != E_REG)
+    return regno;
+  switch (regno)
+    {
+    case E_REG:
+      return L_REG;
+    case D_REG:
+      return H_REG;
+    case L_REG:
+      return E_REG;
+    case H_REG:
+      return D_REG;
+    default:
+      return regno;
+    }
+}
+
+static void
+z80_redirect_begin (int base)
+{
+  gcc_assert (z80_redirect_base < 0);
+  if (base == C_REG)
+    output_asm_insn ("push\thl\n\tld\th,b\n\tld\tl,c", NULL);
+  else
+    output_asm_insn ("ex\tde,hl", NULL);
+  z80_redirect_base = base;
+}
+
+static void
+z80_redirect_end (void)
+{
+  if (z80_redirect_base == C_REG)
+    output_asm_insn ("pop\thl", NULL);
+  else if (z80_redirect_base == E_REG)
+    output_asm_insn ("ex\tde,hl", NULL);
+  z80_redirect_base = -1;
+}
+
 /* The out-of-range (ix+d) address of the insn being output, and the
    displacement that IY has been set to point at (relative to IX).  Set by
    z80_final_prescan_insn.  */
@@ -353,9 +437,26 @@ static HOST_WIDE_INT z80_far_base;
    sequence preserves all other registers.  */
 
 void
-z80_final_prescan_insn (rtx_insn *, rtx *operands, int noperands)
+z80_final_prescan_insn (rtx_insn *insn, rtx *operands, int noperands)
 {
   z80_far_addr = NULL_RTX;
+  z80_redirect_base = -1;
+
+  /* (bc)/(de) operands of arithmetic insns: these only write A, so the
+     access can be redirected around the whole insn.  Moves and jumps do
+     this themselves.  */
+  int code = INSN_CODE (insn);
+  if (!JUMP_P (insn) && code != CODE_FOR_movqi_insn
+      && code != CODE_FOR_movhi_insn)
+    for (int i = 0; i < noperands; i++)
+      {
+	int base = z80_mem_redirect_base (operands[i]);
+	if (base >= 0)
+	  {
+	    z80_redirect_begin (base);
+	    break;
+	  }
+      }
 
   for (int i = 0; i < noperands; i++)
     {
@@ -389,6 +490,16 @@ z80_final_prescan_insn (rtx_insn *, rtx *operands, int noperands)
     }
 }
 
+/* Implement TARGET_ASM_FINAL_POSTSCAN_INSN: finish a redirection started
+   by z80_final_prescan_insn.  */
+
+static void
+z80_final_postscan_insn (FILE *, rtx_insn *, rtx *, int)
+{
+  if (z80_redirect_base >= 0)
+    z80_redirect_end ();
+}
+
 /* Print the memory address ADDR, displaced by OFFSET bytes.  */
 
 static void
@@ -406,8 +517,11 @@ z80_print_address (FILE *file, rtx addr, HOST_WIDE_INT offset)
   if (REG_P (base))
     {
       unsigned int regno = REGNO (base);
-      if (regno == L_REG && disp == 0)
+      if (disp == 0 && (regno == L_REG || (int) regno == z80_redirect_base))
 	fputs ("(hl)", file);
+      else if (disp == 0 && (regno == C_REG || regno == E_REG))
+	/* Only "ld a,(bc)" style instructions get here.  */
+	fprintf (file, "(%s)", z80_pair_name (regno));
       else if (regno == IXL_REG && z80_far_addr
 	       && rtx_equal_p (addr, z80_far_addr))
 	fprintf (file, "(iy%+d)", (int) (disp - z80_far_base));
@@ -446,7 +560,7 @@ z80_print_operand (FILE *file, rtx x, int code)
     {
     case REG:
       {
-	unsigned int regno = REGNO (x);
+	unsigned int regno = z80_redirected_regno (REGNO (x));
 	if (code == 'P')
 	  fputs (z80_containing_pair_name (regno), file);
 	else if (code == 'L')
@@ -504,6 +618,34 @@ z80_print_operand (FILE *file, rtx x, int code)
     }
 }
 
+/* Implement ASM_OUTPUT_ASCII.  Output LENGTH bytes of STR as .ascii
+   directives, escaping quotes, backslashes and non-printable characters
+   in octal: the z80 assembler does not understand \".  */
+
+void
+z80_output_ascii (FILE *file, const char *str, size_t length)
+{
+  size_t column = 0;
+  for (size_t i = 0; i < length; i++)
+    {
+      unsigned char c = str[i];
+      if (column == 0)
+	fputs ("\t.ascii\t\"", file);
+      if (c == '"' || c == '\\' || !ISPRINT (c))
+	column += fprintf (file, "\\%03o", c);
+      else
+	{
+	  fputc (c, file);
+	  column++;
+	}
+      if (column >= 64 || i == length - 1)
+	{
+	  fputs ("\"\n", file);
+	  column = 0;
+	}
+    }
+}
+
 /* Implement TARGET_PRINT_OPERAND_ADDRESS.  */
 
 static void
@@ -525,21 +667,115 @@ z80_move_ok_p (rtx dst, rtx src)
   return !(MEM_P (dst) && MEM_P (src));
 }
 
-/* Output an 8-bit move.  Every alternative is a single "ld".  */
+/* Return the 16-bit piece at byte OFFSET of X, an operand of a MODE move.
+   For memory whose address is not offsettable (e.g. (hl)), *BASE caches a
+   register holding the address so that it is only computed once.  */
+
+static rtx
+z80_wide_move_part (rtx x, machine_mode mode, int offset, rtx *base)
+{
+  if (!MEM_P (x))
+    return simplify_gen_subreg (HImode, x, mode, offset);
+
+  rtx addr = XEXP (x, 0);
+  if (offset == 0 || offsettable_address_p (true, mode, addr))
+    return adjust_address (x, HImode, offset);
+
+  /* (mem (reg)) or similar: address the other pieces relative to a copy of
+     the base address.  */
+  gcc_assert (can_create_pseudo_p ());
+  if (!*base)
+    *base = force_reg (Pmode, addr);
+  rtx part_addr = force_reg (Pmode, plus_constant (Pmode, *base, offset));
+  return adjust_automodify_address (x, HImode, part_addr, offset);
+}
+
+/* Expand a move of a 32- or 64-bit value as a sequence of 16-bit moves.  */
+
+void
+z80_expand_wide_move (rtx dst, rtx src)
+{
+  machine_mode mode = GET_MODE (dst);
+  int size = GET_MODE_SIZE (mode);
+
+  /* A push (e.g. one half of a complex value): push 16-bit pieces, the
+     highest first.  */
+  if (push_operand (dst, mode))
+    {
+      for (int offset = size - 2; offset >= 0; offset -= 2)
+	{
+	  rtx half = simplify_gen_subreg (HImode, src, mode, offset);
+	  emit_insn (gen_pushhi1 (force_reg (HImode, half)));
+	}
+      return;
+    }
+
+  if (can_create_pseudo_p ())
+    {
+      if (MEM_P (dst) && !register_operand (src, mode) && !CONSTANT_P (src))
+	src = force_reg (mode, src);
+
+      /* Do not move between memory and a hard register (e.g. a return value
+	 in DE:HL) directly: the memory address may need HL itself.  Going
+	 through a pseudo keeps the hard register's live range short.  */
+      if (MEM_P (dst) && REG_P (src) && HARD_REGISTER_P (src))
+	src = copy_to_mode_reg (mode, src);
+      else if (MEM_P (src) && REG_P (dst) && HARD_REGISTER_P (dst))
+	{
+	  rtx tmp = gen_reg_rtx (mode);
+	  z80_expand_wide_move (tmp, src);
+	  src = tmp;
+	}
+    }
+
+  /* Moving between overlapping register groups (e.g. BC:DE to DE:HL) must
+     start with the piece that is overwritten last.  */
+  bool backwards = false;
+  if (REG_P (dst) && REG_P (src) && REGNO (dst) > REGNO (src)
+      && REGNO (dst) < REGNO (src) + size)
+    backwards = true;
+
+  rtx dst_base = NULL_RTX, src_base = NULL_RTX;
+  for (int i = 0; i < size; i += 2)
+    {
+      int offset = backwards ? size - 2 - i : i;
+      rtx d = z80_wide_move_part (dst, mode, offset, &dst_base);
+      rtx s = z80_wide_move_part (src, mode, offset, &src_base);
+      emit_move_insn (d, s);
+    }
+}
+
+/* Output an 8-bit move.  Every alternative is a single "ld", except for
+   (bc)/(de) accesses, which are redirected through HL - or through A when
+   the other operand is H or L, which the (bc) redirection would destroy.  */
 
 const char *
 z80_output_movqi (rtx *operands)
 {
-  if (REG_P (operands[0]) && REG_P (operands[1])
-      && REGNO (operands[0]) == REGNO (operands[1]))
-    return "";
-  return "ld\t%0,%1";
-}
+  rtx dst = operands[0];
+  rtx src = operands[1];
 
-static bool
-z80_hl_reg_p (rtx x)
-{
-  return REG_P (x) && REGNO (x) == L_REG;
+  if (REG_P (dst) && REG_P (src) && REGNO (dst) == REGNO (src))
+    return "";
+
+  rtx mem = MEM_P (dst) ? dst : MEM_P (src) ? src : NULL_RTX;
+  int base = mem ? z80_mem_redirect_base (mem) : -1;
+  if (base < 0)
+    return "ld\t%0,%1";
+
+  rtx other = mem == dst ? src : dst;
+  if (REG_P (other) && REGNO (other) == A_REG)
+    /* ld a,(bc) / ld (de),a etc.  */
+    return "ld\t%0,%1";
+
+  if (base == C_REG && REG_P (other)
+      && (REGNO (other) == H_REG || REGNO (other) == L_REG))
+    return "push\taf\n\tld\ta,%1\n\tld\t%0,a\n\tpop\taf";
+
+  z80_redirect_begin (base);
+  output_asm_insn ("ld\t%0,%1", operands);
+  z80_redirect_end ();
+  return "";
 }
 
 static bool
@@ -549,6 +785,35 @@ z80_ix_memory_p (rtx mem)
   if (GET_CODE (addr) == PLUS)
     addr = XEXP (addr, 0);
   return REG_P (addr) && REGNO (addr) == IXL_REG;
+}
+
+/* Output a 16-bit load of operand 0 from (hl).  DST is the register that
+   operand 0 is in at this point (it differs from REGNO (operands[0]) while
+   a (de) access is redirected).  */
+
+static void
+z80_output_load_hl (rtx *operands, unsigned int dst)
+{
+  if (dst == L_REG)
+    output_asm_insn ("push\tde\n\tld\te,(hl)\n\tinc\thl\n\tld\td,(hl)\n\t"
+		     "ex\tde,hl\n\tpop\tde", operands);
+  else
+    output_asm_insn ("ld\t%L0,(hl)\n\tinc\thl\n\tld\t%H0,(hl)\n\tdec\thl",
+		     operands);
+}
+
+/* Output a 16-bit store of operand 1 to (hl).  SRC is the register that
+   holds operand 1 at this point, or -1 for a constant.  */
+
+static void
+z80_output_store_hl (rtx *operands, int src)
+{
+  if (src == L_REG)
+    output_asm_insn ("push\tde\n\tld\te,l\n\tld\td,h\n\tld\t(hl),e\n\t"
+		     "inc\thl\n\tld\t(hl),d\n\tdec\thl\n\tpop\tde", operands);
+  else
+    output_asm_insn ("ld\t(hl),%L1\n\tinc\thl\n\tld\t(hl),%H1\n\tdec\thl",
+		     operands);
 }
 
 /* Output a 16-bit move.  The Z80 has no "ld rr,rr'" and only HL (and the
@@ -602,18 +867,36 @@ z80_output_movhi (rtx *operands)
 	return "ld\t%0,%1";
 
       if (z80_ix_memory_p (src))
-	{
-	  /* Load the high byte last: the destination may not overlap
-	     the address register (IX), so the order does not matter.  */
-	  return "ld\t%L0,%L1\n\tld\t%H0,%H1";
-	}
+	return "ld\t%L0,%L1\n\tld\t%H0,%H1";
 
-      /* (hl) */
-      gcc_assert (REG_P (addr) && REGNO (addr) == L_REG);
-      if (d == L_REG)
-	return ("push\tde\n\tld\te,(hl)\n\tinc\thl\n\tld\td,(hl)\n\t"
-		"ex\tde,hl\n\tpop\tde");
-      return "ld\t%L0,(hl)\n\tinc\thl\n\tld\t%H0,(hl)\n\tdec\thl";
+      switch (REGNO (addr))
+	{
+	case L_REG:
+	  z80_output_load_hl (operands, d);
+	  break;
+	case E_REG:
+	  z80_redirect_begin (E_REG);
+	  z80_output_load_hl (operands, z80_redirected_regno (d));
+	  z80_redirect_end ();
+	  break;
+	case C_REG:
+	  if (d == L_REG)
+	    {
+	      /* The destination is HL itself: no need to preserve it.  */
+	      output_asm_insn ("ld\th,b\n\tld\tl,c", operands);
+	      z80_output_load_hl (operands, d);
+	    }
+	  else
+	    {
+	      z80_redirect_begin (C_REG);
+	      z80_output_load_hl (operands, d);
+	      z80_redirect_end ();
+	    }
+	  break;
+	default:
+	  gcc_unreachable ();
+	}
+      return "";
     }
 
   gcc_assert (MEM_P (dst));
@@ -632,12 +915,34 @@ z80_output_movhi (rtx *operands)
       gcc_unreachable ();
     }
 
-  /* (hl) */
-  gcc_assert (REG_P (addr) && REGNO (addr) == L_REG);
-  if (z80_hl_reg_p (src))
-    return ("push\tde\n\tld\te,l\n\tld\td,h\n\tld\t(hl),e\n\tinc\thl\n\t"
-	    "ld\t(hl),d\n\tdec\thl\n\tpop\tde");
-  return "ld\t(hl),%L1\n\tinc\thl\n\tld\t(hl),%H1\n\tdec\thl";
+  int s = REG_P (src) ? (int) REGNO (src) : -1;
+  switch (REGNO (addr))
+    {
+    case L_REG:
+      z80_output_store_hl (operands, s);
+      break;
+    case E_REG:
+      z80_redirect_begin (E_REG);
+      z80_output_store_hl (operands, s < 0 ? s : z80_redirected_regno (s));
+      z80_redirect_end ();
+      break;
+    case C_REG:
+      if (s == L_REG)
+	/* Copy the value to DE first: the redirection needs HL.  */
+	output_asm_insn ("push\tde\n\tld\te,l\n\tld\td,h\n\tpush\thl\n\t"
+			 "ld\th,b\n\tld\tl,c\n\tld\t(hl),e\n\tinc\thl\n\t"
+			 "ld\t(hl),d\n\tpop\thl\n\tpop\tde", operands);
+      else
+	{
+	  z80_redirect_begin (C_REG);
+	  z80_output_store_hl (operands, s);
+	  z80_redirect_end ();
+	}
+      break;
+    default:
+      gcc_unreachable ();
+    }
+  return "";
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1060,7 +1365,15 @@ z80_output_cbranch (rtx *operands, bool reversed)
     return z80_output_cbranch_zero (code, operands);
 
   if (GET_MODE (operands[1]) == QImode)
-    output_asm_insn ("cp\t%2", operands);
+    {
+      /* The flags survive the end of a (bc)/(de) redirection.  */
+      int base = z80_mem_redirect_base (operands[2]);
+      if (base >= 0)
+	z80_redirect_begin (base);
+      output_asm_insn ("cp\t%2", operands);
+      if (base >= 0)
+	z80_redirect_end ();
+    }
   else
     z80_output_compare_hi (operands[1], operands[2]);
 
@@ -1305,7 +1618,9 @@ static int
 z80_address_cost (rtx addr, machine_mode mode, addr_space_t, bool)
 {
   if (REG_P (addr))
-    return 0;
+    /* (hl) is direct; (bc)/(de) are redirected through HL.  Pseudos will
+       usually end up in HL.  */
+    return (REGNO (addr) == C_REG || REGNO (addr) == E_REG) ? 2 : 0;
   if (GET_CODE (addr) == PLUS && CONST_INT_P (XEXP (addr, 1)))
     return (z80_short_displacement_p (INTVAL (XEXP (addr, 1)),
 				      z80_access_size (mode))
@@ -1450,6 +1765,8 @@ z80_scalar_mode_supported_p (scalar_mode mode)
 #define TARGET_HARD_REGNO_MODE_OK z80_hard_regno_mode_ok
 #undef TARGET_MODES_TIEABLE_P
 #define TARGET_MODES_TIEABLE_P z80_modes_tieable_p
+#undef TARGET_CLASS_LIKELY_SPILLED_P
+#define TARGET_CLASS_LIKELY_SPILLED_P z80_class_likely_spilled_p
 
 #undef TARGET_LEGITIMATE_ADDRESS_P
 #define TARGET_LEGITIMATE_ADDRESS_P z80_legitimate_address_p
@@ -1461,6 +1778,9 @@ z80_scalar_mode_supported_p (scalar_mode mode)
 
 #undef TARGET_PRINT_OPERAND
 #define TARGET_PRINT_OPERAND z80_print_operand
+#undef TARGET_ASM_FINAL_POSTSCAN_INSN
+#define TARGET_ASM_FINAL_POSTSCAN_INSN z80_final_postscan_insn
+
 #undef TARGET_PRINT_OPERAND_ADDRESS
 #define TARGET_PRINT_OPERAND_ADDRESS z80_print_operand_address
 

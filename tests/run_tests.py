@@ -61,12 +61,21 @@ def run(cmd, stage):
 LIBGCC_DIR = os.path.join(ROOT, "src", "build-z80", "z80-elf", "libgcc")
 
 
+NEWLIB = os.path.join(ROOT, "install", "z80-elf")
+NEWLIB_FLAGS = ["-isystem", os.path.join(NEWLIB, "include")]
+
+
 def support_objects(outdir):
-    """Assemble the test libc once (until there is a real C library)."""
+    """Compile the system layer for newlib once."""
     if not os.path.exists(os.path.join(LIBGCC_DIR, "libgcc.a")):
         sys.exit("libgcc.a not found: run scripts/make-libgcc.sh")
-    obj = os.path.join(outdir, "libc.o")
-    run([AS, "-o", obj, os.path.join(SUPPORT, "libc.s")], "assemble libc.s")
+    if not os.path.exists(os.path.join(NEWLIB, "lib", "libc.a")):
+        sys.exit("newlib not found: run scripts/install-gcc.sh and "
+                 "scripts/build-newlib.sh")
+    obj = os.path.join(outdir, "sys.o")
+    run(XGCC + NEWLIB_FLAGS + ["-Os", "-c", "-o", obj,
+                               os.path.join(SUPPORT, "sys.c")],
+        "compile sys.c")
     return [obj]
 
 
@@ -95,7 +104,11 @@ def parse_spec(path):
     expect = int(m.group(1), 0)
     m = re.search(r"//\s*opts:\s*(.*)", text)
     opts = m.group(1).split() if m else None
-    return expect, opts
+    # "// output: text" lines give the expected console output, one line
+    # of output each.
+    lines = re.findall(r"^//\s*output:\s?(.*)$", text, re.M)
+    output = "".join(line + "\n" for line in lines) if lines else None
+    return expect, opts, output
 
 
 def execute(elf):
@@ -105,6 +118,13 @@ def execute(elf):
     machine = z80.Z80Machine()
     machine.set_memory_block(0, memory)
     machine.pc = entry
+    output = bytearray()
+
+    def on_output(port, value):
+        if port & 0xff == 1:
+            output.append(value)
+
+    machine.set_output_callback(on_output)
     # run() also returns on internal events (e.g. the end of a video
     # frame), so keep going until HALT or until the tick budget is spent.
     machine.ticks_to_stop = MAX_TICKS
@@ -113,7 +133,7 @@ def execute(elf):
     if not machine.halted:
         raise TestError("run", "did not halt within %d ticks (pc=0x%04x)"
                         % (MAX_TICKS, machine.pc))
-    return machine.hl
+    return machine.hl, output.decode("latin-1")
 
 
 def run_test(path, opt, support):
@@ -128,11 +148,13 @@ def run_test(path, opt, support):
     cflags = [opt, "-ffreestanding", "-fno-builtin"]
     if lang == "c++":
         cflags += ["-fno-exceptions", "-fno-rtti"]
-    run(XGCC + ["-x", lang, "-S", "-o", asm] + cflags + [path], "compile")
+    run(XGCC + NEWLIB_FLAGS + ["-x", lang, "-S", "-o", asm] + cflags + [path],
+        "compile")
     run([AS, "-o", obj, asm], "assemble")
     # Link through the compiler driver: crt0.o and libgcc.a come from the
     # libgcc build directory, the default linker script is used.
-    run(XGCC + ["-B" + LIBGCC_DIR + "/", "-L" + LIBGCC_DIR, "-nolibc",
+    run(XGCC + ["-B" + LIBGCC_DIR + "/", "-L" + LIBGCC_DIR,
+                "-L" + os.path.join(NEWLIB, "lib"),
                 "-Wl,--no-warn-rwx-segments",
                 "-Wl,-Map," + os.path.join(workdir, name + ".map"),
                 "-o", elf, obj] + support, "link")
@@ -172,7 +194,7 @@ def main():
     for path in tests:
         rel = os.path.relpath(path, TESTS)
         try:
-            expect, test_opts = parse_spec(path)
+            expect, test_opts, expect_output = parse_spec(path)
         except TestError as e:
             print("FAIL %-32s %s" % (rel, e))
             failed += 1
@@ -181,7 +203,10 @@ def main():
             label = "%-32s %-4s" % (rel, opt)
             asm = None
             try:
-                result, asm = run_test(path, opt, support)
+                (result, output), asm = run_test(path, opt, support)
+                if expect_output is not None and output != expect_output:
+                    msg = "output %r, expected %r" % (output, expect_output)
+                    raise TestError("output", msg)
                 if result == expect & 0xffff:
                     print("PASS " + label)
                     passed += 1

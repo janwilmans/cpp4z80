@@ -958,6 +958,86 @@ z80_output_compare_hi (rtx op1, rtx op2)
     }
 }
 
+/* Output a compare-and-branch of operand 1 against zero, with the
+   (already reversed if needed) condition CODE.
+
+   8-bit: "or a" if the value is in A, otherwise "inc r / dec r", which
+   leaves the register unchanged and sets Z and S from its value.
+   16-bit: the sign is bit 7 of the high byte; equality with zero needs
+   "ld a,h / or l", so the 16-bit zero-compare pattern clobbers A.
+
+   Only Z and S are valid afterwards, which is all a comparison with zero
+   needs; unsigned comparisons with zero are always/never true or reduce
+   to (in)equality.  */
+
+static const char *
+z80_output_cbranch_zero (enum rtx_code code, rtx *operands)
+{
+  rtx op = operands[1];
+
+  switch (code)
+    {
+    case LTU:
+      return "";
+    case GEU:
+      return "jp\t%l3";
+    case GTU:
+      code = NE;
+      break;
+    case LEU:
+      code = EQ;
+      break;
+    default:
+      break;
+    }
+
+  if (GET_MODE (op) == HImode)
+    {
+      switch (code)
+	{
+	case LT:
+	  return "bit\t7,%H1\n\tjp\tnz,%l3";
+	case GE:
+	  return "bit\t7,%H1\n\tjp\tz,%l3";
+	case EQ:
+	  return "ld\ta,%H1\n\tor\t%L1\n\tjp\tz,%l3";
+	case NE:
+	  return "ld\ta,%H1\n\tor\t%L1\n\tjp\tnz,%l3";
+	case GT:
+	  return ("bit\t7,%H1\n\tjr\tnz,.Ls%=\n\tld\ta,%H1\n\tor\t%L1\n\t"
+		  "jp\tnz,%l3\n.Ls%=:");
+	case LE:
+	  return ("bit\t7,%H1\n\tjp\tnz,%l3\n\tld\ta,%H1\n\tor\t%L1\n\t"
+		  "jp\tz,%l3");
+	default:
+	  gcc_unreachable ();
+	}
+    }
+
+  if (REGNO (op) == A_REG)
+    output_asm_insn ("or\ta", operands);
+  else
+    output_asm_insn ("inc\t%1\n\tdec\t%1", operands);
+
+  switch (code)
+    {
+    case EQ:
+      return "jp\tz,%l3";
+    case NE:
+      return "jp\tnz,%l3";
+    case LT:
+      return "jp\tm,%l3";
+    case GE:
+      return "jp\tp,%l3";
+    case GT:
+      return "jr\tz,.Ls%=\n\tjp\tp,%l3\n.Ls%=:";
+    case LE:
+      return "jp\tz,%l3\n\tjp\tm,%l3";
+    default:
+      gcc_unreachable ();
+    }
+}
+
 /* Output a compare-and-branch.  Operand 0 is the comparison, operands 1 and
    2 the values compared and operand 3 the target label.  If REVERSED, the
    jump is taken when the comparison is false.
@@ -973,6 +1053,9 @@ z80_output_cbranch (rtx *operands, bool reversed)
   enum rtx_code code = GET_CODE (operands[0]);
   if (reversed)
     code = reverse_condition (code);
+
+  if (operands[2] == const0_rtx)
+    return z80_output_cbranch_zero (code, operands);
 
   if (GET_MODE (operands[1]) == QImode)
     output_asm_insn ("cp\t%2", operands);
@@ -1205,6 +1288,129 @@ z80_return_in_memory (const_tree type, const_tree)
 }
 
 /* ------------------------------------------------------------------------- */
+/* Costs                                                                     */
+/* ------------------------------------------------------------------------- */
+
+/* The costs below approximate the number of instructions needed; that is a
+   reasonable measure of both size and speed on the Z80.  */
+
+/* Implement TARGET_ADDRESS_COST.  (hl) is the cheapest address, (ix+d)
+   needs a prefix and a displacement byte, an absolute address can only be
+   used with A or 16-bit HL/ED-prefixed loads, and a far (ix+d) needs IY to
+   be set up first.  */
+
+static int
+z80_address_cost (rtx addr, machine_mode mode, addr_space_t, bool)
+{
+  if (REG_P (addr))
+    return 0;
+  if (GET_CODE (addr) == PLUS && CONST_INT_P (XEXP (addr, 1)))
+    return (z80_short_displacement_p (INTVAL (XEXP (addr, 1)),
+				      z80_access_size (mode))
+	    ? 1 : 8);
+  if (CONSTANT_P (addr))
+    return 1;
+  return 4;
+}
+
+/* Implement TARGET_RTX_COSTS.  */
+
+static bool
+z80_rtx_costs (rtx x, machine_mode mode, int outer_code, int,
+	       int *total, bool speed)
+{
+  int size = mode == VOIDmode || mode == BLKmode ? 1 : GET_MODE_SIZE (mode);
+  enum rtx_code code = GET_CODE (x);
+
+  switch (code)
+    {
+    case CONST_INT:
+    case CONST:
+    case SYMBOL_REF:
+    case LABEL_REF:
+      /* Constants are immediate operands of most instructions.  */
+      *total = 0;
+      return true;
+
+    case MEM:
+      *total = (COSTS_N_INSNS (size)
+		+ z80_address_cost (XEXP (x, 0), mode, ADDR_SPACE_GENERIC,
+				    speed));
+      return true;
+
+    case PLUS:
+      if (size == 1)
+	*total = COSTS_N_INSNS (1);
+      else if (size == 2)
+	*total = (CONST_INT_P (XEXP (x, 1))
+		  && IN_RANGE (INTVAL (XEXP (x, 1)), -2, 2)
+		  ? COSTS_N_INSNS (1) : COSTS_N_INSNS (2));
+      else
+	*total = COSTS_N_INSNS (3 * size);
+      return false;
+
+    case MINUS:
+      *total = COSTS_N_INSNS (size == 1 ? 1 : size == 2 ? 2 : 3 * size);
+      return false;
+
+    case AND:
+    case IOR:
+    case XOR:
+      /* Through A, one byte at a time.  */
+      *total = COSTS_N_INSNS (size == 1 ? 1 : 3 * size);
+      return false;
+
+    case NEG:
+    case NOT:
+      *total = COSTS_N_INSNS (size == 1 ? 1 : 3 * size);
+      return false;
+
+    case MULT:
+      /* Library calls.  */
+      *total = COSTS_N_INSNS (speed ? 30 * size : 4 + size);
+      return true;
+
+    case DIV:
+    case UDIV:
+    case MOD:
+    case UMOD:
+      *total = COSTS_N_INSNS (speed ? 60 * size : 4 + size);
+      return true;
+
+    case ASHIFT:
+    case LSHIFTRT:
+    case ASHIFTRT:
+      if (size > 2)
+	*total = COSTS_N_INSNS (6);
+      else if (CONST_INT_P (XEXP (x, 1)))
+	{
+	  int count = INTVAL (XEXP (x, 1)) & (8 * size - 1);
+	  if (size == 2 && count >= 8)
+	    count = 2 + (count - 8);
+	  *total = COSTS_N_INSNS (count * size);
+	}
+      else
+	*total = COSTS_N_INSNS (6 + 2 * size);
+      return false;
+
+    case ZERO_EXTEND:
+      *total = COSTS_N_INSNS (1);
+      return false;
+
+    case SIGN_EXTEND:
+      *total = COSTS_N_INSNS (4);
+      return false;
+
+    case COMPARE:
+      *total = COSTS_N_INSNS (size == 1 ? 1 : 3);
+      return false;
+
+    default:
+      return false;
+    }
+}
+
+/* ------------------------------------------------------------------------- */
 /* Target hooks                                                              */
 /* ------------------------------------------------------------------------- */
 
@@ -1217,6 +1423,11 @@ z80_return_in_memory (const_tree type, const_tree)
 
 #undef TARGET_LEGITIMATE_ADDRESS_P
 #define TARGET_LEGITIMATE_ADDRESS_P z80_legitimate_address_p
+
+#undef TARGET_ADDRESS_COST
+#define TARGET_ADDRESS_COST z80_address_cost
+#undef TARGET_RTX_COSTS
+#define TARGET_RTX_COSTS z80_rtx_costs
 
 #undef TARGET_PRINT_OPERAND
 #define TARGET_PRINT_OPERAND z80_print_operand

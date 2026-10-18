@@ -87,8 +87,11 @@ def execute(binary):
 
     machine = z80.Z80Machine()
     machine.set_memory_block(0, binary)
+    # run() also returns on internal events (e.g. the end of a video
+    # frame), so keep going until HALT or until the tick budget is spent.
     machine.ticks_to_stop = MAX_TICKS
-    machine.run()
+    while not machine.halted and machine.ticks_to_stop > 0:
+        machine.run()
     if not machine.halted:
         raise TestError("run", "did not halt within %d ticks (pc=0x%04x)"
                         % (MAX_TICKS, machine.pc))

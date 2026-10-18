@@ -700,6 +700,152 @@ z80_output_addhi3 (rtx *operands)
 }
 
 /* ------------------------------------------------------------------------- */
+/* Shifts                                                                    */
+/* ------------------------------------------------------------------------- */
+
+/* Output a single-bit shift of operand 0 in direction CODE.  */
+
+static void
+z80_output_shift1 (enum rtx_code code, rtx *operands)
+{
+  rtx dst = operands[0];
+
+  if (GET_MODE (dst) == QImode)
+    {
+      if (code == ASHIFT && REGNO (dst) == A_REG)
+	output_asm_insn ("add\ta,a", operands);
+      else if (code == ASHIFT)
+	output_asm_insn ("sla\t%0", operands);
+      else if (code == LSHIFTRT)
+	output_asm_insn ("srl\t%0", operands);
+      else
+	output_asm_insn ("sra\t%0", operands);
+      return;
+    }
+
+  if (code == ASHIFT && REGNO (dst) == L_REG)
+    output_asm_insn ("add\thl,hl", operands);
+  else if (code == ASHIFT)
+    output_asm_insn ("sla\t%L0\n\trl\t%H0", operands);
+  else if (code == LSHIFTRT)
+    output_asm_insn ("srl\t%H0\n\trr\t%L0", operands);
+  else
+    output_asm_insn ("sra\t%H0\n\trr\t%L0", operands);
+}
+
+/* Output a shift of operand 0 (tied to operand 1) by operand 2 in
+   direction CODE.  For a variable count operand 3 is a scratch QImode
+   register used as loop counter.  */
+
+const char *
+z80_output_shift (enum rtx_code code, rtx *operands)
+{
+  rtx dst = operands[0];
+  bool hi = GET_MODE (dst) == HImode;
+  int bits = hi ? 16 : 8;
+
+  if (!CONST_INT_P (operands[2]))
+    {
+      output_asm_insn ("ld\t%3,%2\n\tinc\t%3\n\tjr\t.Lt%=\n.Ll%=:",
+		       operands);
+      z80_output_shift1 (code, operands);
+      output_asm_insn (".Lt%=:\n\tdec\t%3\n\tjr\tnz,.Ll%=", operands);
+      return "";
+    }
+
+  HOST_WIDE_INT count = INTVAL (operands[2]) & (bits - 1);
+
+  if (hi && count >= 8)
+    {
+      /* Move a whole byte first.  */
+      if (code == ASHIFT)
+	output_asm_insn ("ld\t%H0,%L0\n\tld\t%L0,0", operands);
+      else if (code == LSHIFTRT)
+	output_asm_insn ("ld\t%L0,%H0\n\tld\t%H0,0", operands);
+      else
+	output_asm_insn ("ld\t%L0,%H0\n\tsla\t%H0\n\tld\t%H0,0\n\t"
+			 "jr\tnc,.Lp%=\n\tdec\t%H0\n.Lp%=:", operands);
+      count -= 8;
+      for (; count > 0; count--)
+	{
+	  if (code == ASHIFT)
+	    output_asm_insn ("sla\t%H0", operands);
+	  else if (code == LSHIFTRT)
+	    output_asm_insn ("srl\t%L0", operands);
+	  else
+	    output_asm_insn ("sra\t%L0", operands);
+	}
+      return "";
+    }
+
+  for (; count > 0; count--)
+    z80_output_shift1 (code, operands);
+  return "";
+}
+
+/* ------------------------------------------------------------------------- */
+/* Compare and branch                                                        */
+/* ------------------------------------------------------------------------- */
+
+/* Output a compare-and-branch.  Operand 0 is the comparison, operands 1 and
+   2 the values compared and operand 3 the target label.  If REVERSED, the
+   jump is taken when the comparison is false.
+
+   After "cp" (8-bit) or "sbc hl,rr" (16-bit) the flags are:
+     Z    equal
+     C    unsigned less than (borrow)
+     S^V  signed less than (sign, corrected by overflow)  */
+
+const char *
+z80_output_cbranch (rtx *operands, bool reversed)
+{
+  enum rtx_code code = GET_CODE (operands[0]);
+  if (reversed)
+    code = reverse_condition (code);
+
+  if (GET_MODE (operands[1]) == QImode)
+    output_asm_insn ("cp\t%2", operands);
+  else if (CONST_INT_P (operands[2]) || !REG_P (operands[2]))
+    /* HL against a constant: use DE as temporary.  "add hl,de" restores
+       HL without changing S, Z, P/V; it sets C exactly when the
+       subtraction borrowed, so all flags still describe HL - DE.  */
+    output_asm_insn ("push\tde\n\tld\tde,%2\n\tor\ta\n\t"
+		     "sbc\thl,de\n\tadd\thl,de\n\tpop\tde", operands);
+  else
+    output_asm_insn ("or\ta\n\tsbc\thl,%2\n\tadd\thl,%2", operands);
+
+  switch (code)
+    {
+    case EQ:
+      return "jp\tz,%l3";
+    case NE:
+      return "jp\tnz,%l3";
+    case LTU:
+      return "jp\tc,%l3";
+    case GEU:
+      return "jp\tnc,%l3";
+    case GTU:
+      return "jr\tz,.Ls%=\n\tjp\tnc,%l3\n.Ls%=:";
+    case LEU:
+      return "jp\tc,%l3\n\tjp\tz,%l3";
+    case LT:
+      return ("jp\tpe,.Lo%=\n\tjp\tm,%l3\n\tjr\t.Ls%=\n"
+	      ".Lo%=:\n\tjp\tp,%l3\n.Ls%=:");
+    case GE:
+      return ("jp\tpe,.Lo%=\n\tjp\tp,%l3\n\tjr\t.Ls%=\n"
+	      ".Lo%=:\n\tjp\tm,%l3\n.Ls%=:");
+    case GT:
+      return ("jr\tz,.Ls%=\n\tjp\tpe,.Lo%=\n\tjp\tp,%l3\n\tjr\t.Ls%=\n"
+	      ".Lo%=:\n\tjp\tm,%l3\n.Ls%=:");
+    case LE:
+      return ("jp\tz,%l3\n\tjp\tpe,.Lo%=\n\tjp\tm,%l3\n\tjr\t.Ls%=\n"
+	      ".Lo%=:\n\tjp\tp,%l3\n.Ls%=:");
+    default:
+      gcc_unreachable ();
+    }
+}
+
+/* ------------------------------------------------------------------------- */
 /* Prologue and epilogue                                                     */
 /* ------------------------------------------------------------------------- */
 

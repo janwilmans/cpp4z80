@@ -12,9 +12,14 @@
 ;   first argument  in L / HL, second argument in E / DE
 ;   result          in L / HL
 ;   only IX must be preserved.
+;
+; libgcc assembles this file once per function listed in LIB1ASMFUNCS
+; (see t-z80), with L_<function> defined.  Helpers shared between these
+; objects have global __z80_ names.
 
 	.text
 
+#ifdef L_mulhi3
 ; ---------------------------------------------------------------------------
 ; __mulhi3:  HL = HL * DE   (also correct for signed operands)
 ; ---------------------------------------------------------------------------
@@ -41,14 +46,17 @@ __mulqi3:
 	ld	h,0
 	ld	d,0
 	jr	__mulhi3
+#endif /* L_mulhi3 */
 
+#ifdef L_udivmodhi4
 ; ---------------------------------------------------------------------------
-; __udivmodhi_core:  unsigned 16-bit division
+; __z80_udivmodhi:  unsigned 16-bit division
 ;   in:   HL = dividend, DE = divisor
 ;   out:  BC = quotient, HL = remainder
 ; Restoring shift-and-subtract division, one quotient bit per iteration.
 ; ---------------------------------------------------------------------------
-__udivmodhi_core:
+	.globl	__z80_udivmodhi
+__z80_udivmodhi:
 	ld	b,h
 	ld	c,l		; BC = dividend, shifted into the remainder
 	ld	hl,0		; HL = remainder
@@ -76,7 +84,7 @@ __udivmodhi_core:
 ; __udivhi3:  HL = HL / DE (unsigned)
 	.globl	__udivhi3
 __udivhi3:
-	call	__udivmodhi_core
+	call	__z80_udivmodhi
 	ld	h,b
 	ld	l,c
 	ret
@@ -84,7 +92,7 @@ __udivhi3:
 ; __umodhi3:  HL = HL % DE (unsigned)
 	.globl	__umodhi3
 __umodhi3:
-	jr	__udivmodhi_core
+	jr	__z80_udivmodhi
 
 ; __udivqi3:  L = L / E (unsigned)
 	.globl	__udivqi3
@@ -98,16 +106,19 @@ __udivqi3:
 __umodqi3:
 	ld	h,0
 	ld	d,0
-	jr	__udivmodhi_core
+	jr	__z80_udivmodhi
+#endif /* L_udivmodhi4 */
 
+#ifdef L_divmodhi4
 ; ---------------------------------------------------------------------------
 ; Signed division: divide the magnitudes, then fix the sign.
 ; The quotient is negative if the operand signs differ; the remainder has
 ; the sign of the dividend (C99 truncating division).
 ; ---------------------------------------------------------------------------
 
-; __neghl:  HL = -HL
-__neghl:
+; __z80_neghl:  HL = -HL
+	.globl	__z80_neghl
+__z80_neghl:
 	xor	a
 	sub	l
 	ld	l,a
@@ -116,11 +127,12 @@ __neghl:
 	ld	h,a
 	ret
 
-; __abshl:  HL = |HL|
-__abshl:
+; __z80_abshl:  HL = |HL|
+	.globl	__z80_abshl
+__z80_abshl:
 	bit	7,h
 	ret	z
-	jr	__neghl
+	jr	__z80_neghl
 
 ; __divhi3:  HL = HL / DE (signed)
 	.globl	__divhi3
@@ -128,16 +140,16 @@ __divhi3:
 	ld	a,h
 	xor	d		; S = sign of the quotient
 	push	af
-	call	__abshl
+	call	__z80_abshl
 	ex	de,hl
-	call	__abshl
+	call	__z80_abshl
 	ex	de,hl
-	call	__udivmodhi_core
+	call	__z80_udivmodhi
 	ld	h,b
 	ld	l,c
 	pop	af
 	ret	p
-	jr	__neghl
+	jr	__z80_neghl
 
 ; __modhi3:  HL = HL % DE (signed)
 	.globl	__modhi3
@@ -145,14 +157,14 @@ __modhi3:
 	ld	a,h
 	or	a		; S = sign of the dividend
 	push	af
-	call	__abshl
+	call	__z80_abshl
 	ex	de,hl
-	call	__abshl
+	call	__z80_abshl
 	ex	de,hl
-	call	__udivmodhi_core
+	call	__z80_udivmodhi
 	pop	af
 	ret	p
-	jr	__neghl
+	jr	__z80_neghl
 
 ; Sign-extend the 8-bit arguments L and E and use the 16-bit routines.
 	.globl	__divqi3
@@ -178,6 +190,7 @@ __modqi3:
 	sbc	a,a
 	ld	d,a
 	jr	__modhi3
+#endif /* L_divmodhi4 */
 
 ; ===========================================================================
 ; 32-bit routines.
@@ -190,9 +203,11 @@ __modqi3:
 ; The routines that need a frame set up IX like compiled code does:
 ;   (ix+4..7) first argument, (ix+8..11) second argument.
 ; ===========================================================================
+#ifdef L_divmodsi4
 
-; __neg32:  DE:HL = -DE:HL
-__neg32:
+; __z80_neg32:  DE:HL = -DE:HL
+	.globl	__z80_neg32
+__z80_neg32:
 	xor	a
 	sub	e
 	ld	e,a
@@ -207,8 +222,9 @@ __neg32:
 	ld	h,a
 	ret
 
-; __neg32_mem:  negate the 32-bit value at (hl)
-__neg32_mem:
+; __z80_neg32_mem:  negate the 32-bit value at (hl)
+	.globl	__z80_neg32_mem
+__z80_neg32_mem:
 	xor	a
 	sub	(hl)
 	ld	(hl),a
@@ -225,7 +241,9 @@ __neg32_mem:
 	sbc	a,(hl)
 	ld	(hl),a
 	ret
+#endif /* L_divmodsi4 */
 
+#ifdef L_mulsi3
 ; ---------------------------------------------------------------------------
 ; __mulsi3:  a * b  (also correct for signed operands)
 ; Shift-and-add over the 32 bits of b, most significant bit first.
@@ -263,13 +281,16 @@ __mulsi3:
 	djnz	.Lmul32_loop
 	pop	ix
 	ret
+#endif /* L_mulsi3 */
 
+#ifdef L_udivmodsi4
 ; ---------------------------------------------------------------------------
-; __udivmodsi_core:  unsigned 32-bit division, IX frame already set up
+; __z80_udivmodsi:  unsigned 32-bit division, IX frame already set up
 ;   in:   (ix+4..7) dividend, (ix+8..11) divisor
 ;   out:  (ix+4..7) quotient, DE:HL remainder
 ; ---------------------------------------------------------------------------
-__udivmodsi_core:
+	.globl	__z80_udivmodsi
+__z80_udivmodsi:
 	ld	hl,0
 	ld	de,0		; remainder DE:HL = 0
 	ld	b,32
@@ -319,7 +340,8 @@ __udivmodsi_core:
 	ret
 
 ; Load the quotient from (ix+4..7) into DE:HL.
-__load_quotient:
+	.globl	__z80_load_quotient
+__z80_load_quotient:
 	ld	e,(ix+4)
 	ld	d,(ix+5)
 	ld	l,(ix+6)
@@ -331,8 +353,8 @@ __udivsi3:
 	push	ix
 	ld	ix,0
 	add	ix,sp
-	call	__udivmodsi_core
-	call	__load_quotient
+	call	__z80_udivmodsi
+	call	__z80_load_quotient
 	pop	ix
 	ret
 
@@ -341,19 +363,22 @@ __umodsi3:
 	push	ix
 	ld	ix,0
 	add	ix,sp
-	call	__udivmodsi_core
+	call	__z80_udivmodsi
 	pop	ix
 	ret
+#endif /* L_udivmodsi4 */
 
+#ifdef L_divmodsi4
 ; Make both arguments non-negative (in place).
-__abs_args32:
+	.globl	__z80_abs_args32
+__z80_abs_args32:
 	bit	7,(ix+7)
 	jr	z,.Labs32_b
 	push	ix
 	pop	hl
 	ld	de,4
 	add	hl,de
-	call	__neg32_mem
+	call	__z80_neg32_mem
 .Labs32_b:
 	bit	7,(ix+11)
 	ret	z
@@ -361,7 +386,7 @@ __abs_args32:
 	pop	hl
 	ld	de,8
 	add	hl,de
-	jp	__neg32_mem
+	jp	__z80_neg32_mem
 
 	.globl	__divsi3
 __divsi3:
@@ -371,13 +396,13 @@ __divsi3:
 	ld	a,(ix+7)
 	xor	(ix+11)		; S = sign of the quotient
 	push	af
-	call	__abs_args32
-	call	__udivmodsi_core
-	call	__load_quotient
+	call	__z80_abs_args32
+	call	__z80_udivmodsi
+	call	__z80_load_quotient
 	pop	af
 	pop	ix
 	ret	p
-	jp	__neg32
+	jp	__z80_neg32
 
 	.globl	__modsi3
 __modsi3:
@@ -387,20 +412,23 @@ __modsi3:
 	ld	a,(ix+7)
 	or	a		; S = sign of the dividend
 	push	af
-	call	__abs_args32
-	call	__udivmodsi_core
+	call	__z80_abs_args32
+	call	__z80_udivmodsi
 	pop	af
 	pop	ix
 	ret	p
-	jp	__neg32
+	jp	__z80_neg32
+#endif /* L_divmodsi4 */
 
+#ifdef L_shiftsi3
 ; ---------------------------------------------------------------------------
 ; 32-bit shifts: value at (sp+2), count in L, result in DE:HL.
 ; ---------------------------------------------------------------------------
 
 ; Load the value into DE:HL and the count (masked to 0..31) into A/B.
 ; Returns with Z set if the count is zero.
-__shift_args32:
+	.globl	__z80_shift_args32
+__z80_shift_args32:
 	ld	b,l
 	ld	hl,4		; skip our own return address too
 	add	hl,sp
@@ -419,7 +447,7 @@ __shift_args32:
 
 	.globl	__ashlsi3
 __ashlsi3:
-	call	__shift_args32
+	call	__z80_shift_args32
 	ret	z
 .Lashl32:
 	sla	e
@@ -430,7 +458,7 @@ __ashlsi3:
 
 	.globl	__lshrsi3
 __lshrsi3:
-	call	__shift_args32
+	call	__z80_shift_args32
 	ret	z
 .Llshr32:
 	srl	h
@@ -442,7 +470,7 @@ __lshrsi3:
 
 	.globl	__ashrsi3
 __ashrsi3:
-	call	__shift_args32
+	call	__z80_shift_args32
 	ret	z
 .Lashr32:
 	sra	h
@@ -451,3 +479,4 @@ __ashrsi3:
 	rr	e
 	djnz	.Lashr32
 	ret
+#endif /* L_shiftsi3 */

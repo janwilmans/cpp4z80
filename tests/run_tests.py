@@ -12,8 +12,8 @@ levels it is run at:
     // opts: -O0 -O2
 
 Each test is compiled with the freshly built cross compiler, assembled and
-linked with the z80-elf binutils together with tests/support/crt0.s (and
-the runtime library, if present), and run in the `z80` Python emulator.
+linked with the z80-elf binutils together with tests/support/crt0.s,
+tests/support/libc.s and libgcc.a, and run in the `z80` Python emulator.
 
 Usage:  tests/run_tests.py [-v] [-O LEVEL ...] [test files...]
 """
@@ -58,23 +58,25 @@ def run(cmd, stage):
     return proc
 
 
-LIBGCC_Z80 = os.path.join(ROOT, "src", "gcc-16.2.0", "libgcc", "config",
-                          "z80")
+LIBGCC = os.path.join(ROOT, "src", "build-z80", "z80-elf", "libgcc",
+                      "libgcc.a")
 
 
 def support_objects(outdir):
-    """Assemble crt0.s and the runtime routines once.
+    """Assemble crt0.s and the test libc once.
 
-    Returns [crt0.o, runtime objects...]; crt0.o must be linked first."""
+    Returns [crt0.o, other objects and libraries...]; crt0.o must be
+    linked first and libgcc.a last."""
+    if not os.path.exists(LIBGCC):
+        sys.exit("libgcc.a not found: run scripts/make-libgcc.sh")
     objs = []
     for src in (os.path.join(SUPPORT, "crt0.s"),
-                os.path.join(LIBGCC_Z80, "lib1funcs.S"),
                 os.path.join(SUPPORT, "libc.s")):
         name = os.path.basename(src)
         obj = os.path.join(outdir, os.path.splitext(name)[0] + ".o")
         run([AS, "-o", obj, src], "assemble " + name)
         objs.append(obj)
-    return objs
+    return objs + [LIBGCC]
 
 
 def parse_spec(path):

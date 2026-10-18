@@ -1549,6 +1549,10 @@ visium-*-elf*)
 xstormy16-*-elf)
 	tmake_file="stormy16/t-stormy16 t-fdpbit"
 	;;
+z80-*-elf*)
+	tmake_file="${tmake_file} z80/t-z80 t-fdpbit"
+	extra_parts=""
+	;;
 xtensa*-*-elf*)
 	tmake_file="$tmake_file xtensa/t-xtensa xtensa/t-elf"
 	extra_parts="$extra_parts crti.o crtn.o"

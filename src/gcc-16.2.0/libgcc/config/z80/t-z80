@@ -1,0 +1,15 @@
+# libgcc makefile fragment for the Z80.
+
+# Integer multiply/divide/shift helpers in assembly.  Each name is one
+# object, built from lib1funcs.S with L_<name> defined.
+LIB1ASMSRC = z80/lib1funcs.S
+LIB1ASMFUNCS = _mulhi3 _udivmodhi4 _divmodhi4 _mulsi3 _udivmodsi4 \
+	_divmodsi4 _shiftsi3
+
+# No exception handling support (yet): leave out the unwinder.
+LIB2ADDEH =
+LIB2ADDEHSTATIC =
+LIB2ADDEHSHARED =
+LIB2_DIVMOD_EXCEPTION_FLAGS = -fno-exceptions -fno-non-call-exceptions
+
+HOST_LIBGCC2_CFLAGS += -Os -Dinhibit_libc

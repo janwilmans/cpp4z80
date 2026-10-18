@@ -42,9 +42,17 @@
 
 /* The Z80 is an 8-bit machine: a "word" in the GCC sense is one byte.
    16-bit values live in register pairs (two consecutive hard registers),
-   just like on the AVR port.  */
-#define BITS_PER_WORD 8
+   just like on the AVR port.
+
+   libgcc2.c derives its "word" and "double word" types from
+   UNITS_PER_WORD; like AVR, pretend 32-bit words there so that it provides
+   the 32/64-bit (long / long long) routines.  The 8/16/32-bit multiply,
+   divide and shift helpers come from config/z80/lib1funcs.S.  */
+#ifdef IN_LIBGCC2
+#define UNITS_PER_WORD 4
+#else
 #define UNITS_PER_WORD 1
+#endif
 
 #define POINTER_SIZE 16
 #define Pmode HImode
@@ -234,6 +242,13 @@ enum reg_class
 
 #define INITIAL_ELIMINATION_OFFSET(FROM, TO, OFFSET)                           \
   ((OFFSET) = z80_initial_elimination_offset ((FROM), (TO)))
+
+/* On entry the return address is the word at (sp); it was pushed by the
+   call, so the CFA (the value of SP before the call) is SP + 2.  Needed
+   for DWARF call frame information (-g).  */
+#define INCOMING_RETURN_ADDR_RTX                                               \
+  gen_rtx_MEM (HImode, gen_rtx_REG (HImode, SP_REG))
+#define INCOMING_FRAME_SP_OFFSET 2
 
 /* Only 16-bit pushes exist; a byte argument still takes up two bytes.  */
 #define PUSH_ROUNDING(BYTES) z80_push_rounding (BYTES)

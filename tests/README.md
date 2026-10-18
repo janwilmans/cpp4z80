@@ -9,6 +9,7 @@ program halts) must equal the value in the file's `// expect:` line.
 ```sh
 scripts/setup-test-env.sh      # once: binutils + emulator venv
 scripts/make-gcc.sh            # rebuild the compiler after backend changes
+scripts/make-libgcc.sh         # (re)build libgcc with that compiler
 tests/run_tests.py             # run everything
 tests/run_tests.py -v -O 0 tests/c/007_stack_args.c   # one test, show asm
 ```
@@ -19,8 +20,9 @@ Support code linked into every test program:
 
 - `support/crt0.s` - sets SP, runs C++ global constructors (`.ctors`,
   `.init_array`), calls `main` and halts.
-- `src/gcc-16.2.0/libgcc/config/z80/lib1funcs.S` - multiply/divide/shift
-  helpers that the compiler calls (`__mulhi3`, `__divsi3`, ...).
+- `libgcc.a` - built by `scripts/make-libgcc.sh`: the assembly helpers from
+  `src/gcc-16.2.0/libgcc/config/z80/lib1funcs.S` (`__mulhi3`, `__divsi3`,
+  ...) plus the generic C routines (64-bit integers, soft float).
 - `support/libc.s` - `memcpy`, `memmove`, `memset`, `memcmp`, which GCC may
   call implicitly (e.g. for struct copies).
 - `support/z80.ld` - flat 64K memory layout.

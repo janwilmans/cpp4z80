@@ -38,7 +38,8 @@ XGCC = [os.path.join(GCC_BUILD, "xgcc"), "-B" + GCC_BUILD + "/"]
 AS = os.path.join(BINUTILS, "z80-elf-as")
 
 DEFAULT_OPTS = ["-O0", "-O1", "-O2", "-Os"]
-MAX_TICKS = 20_000_000
+# The emulator is fast (10^9 ticks take about a second), so be generous.
+MAX_TICKS = int(os.environ.get("Z80_MAX_TICKS", 1_000_000_000))
 
 
 class TestError(Exception):

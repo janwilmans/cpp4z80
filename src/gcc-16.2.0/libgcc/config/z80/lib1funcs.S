@@ -13,6 +13,10 @@
 ;   result          in L / HL
 ;   only IX must be preserved.
 ;
+; C symbols get a "_" prefix in assembly (USER_LABEL_PREFIX), so the
+; routine GCC calls as __mulhi3 is ___mulhi3 here.  The __z80_* helpers
+; are only used from assembly.
+;
 ; libgcc assembles this file once per function listed in LIB1ASMFUNCS
 ; (see t-z80), with L_<function> defined.  Helpers shared between these
 ; objects have global __z80_ names.
@@ -21,10 +25,10 @@
 
 #ifdef L_mulhi3
 ; ---------------------------------------------------------------------------
-; __mulhi3:  HL = HL * DE   (also correct for signed operands)
+; ___mulhi3:  HL = HL * DE   (also correct for signed operands)
 ; ---------------------------------------------------------------------------
-	.globl	__mulhi3
-__mulhi3:
+	.globl	___mulhi3
+___mulhi3:
 	ld	b,h
 	ld	c,l		; BC = multiplicand
 	ld	hl,0
@@ -40,12 +44,12 @@ __mulhi3:
 	jr	nz,.Lmul_loop
 	ret
 
-; __mulqi3:  L = L * E
-	.globl	__mulqi3
-__mulqi3:
+; ___mulqi3:  L = L * E
+	.globl	___mulqi3
+___mulqi3:
 	ld	h,0
 	ld	d,0
-	jr	__mulhi3
+	jr	___mulhi3
 #endif /* L_mulhi3 */
 
 #ifdef L_udivmodhi4
@@ -81,29 +85,29 @@ __z80_udivmodhi:
 	jr	nz,.Ldiv_loop
 	ret
 
-; __udivhi3:  HL = HL / DE (unsigned)
-	.globl	__udivhi3
-__udivhi3:
+; ___udivhi3:  HL = HL / DE (unsigned)
+	.globl	___udivhi3
+___udivhi3:
 	call	__z80_udivmodhi
 	ld	h,b
 	ld	l,c
 	ret
 
-; __umodhi3:  HL = HL % DE (unsigned)
-	.globl	__umodhi3
-__umodhi3:
+; ___umodhi3:  HL = HL % DE (unsigned)
+	.globl	___umodhi3
+___umodhi3:
 	jr	__z80_udivmodhi
 
-; __udivqi3:  L = L / E (unsigned)
-	.globl	__udivqi3
-__udivqi3:
+; ___udivqi3:  L = L / E (unsigned)
+	.globl	___udivqi3
+___udivqi3:
 	ld	h,0
 	ld	d,0
-	jr	__udivhi3
+	jr	___udivhi3
 
-; __umodqi3:  L = L % E (unsigned)
-	.globl	__umodqi3
-__umodqi3:
+; ___umodqi3:  L = L % E (unsigned)
+	.globl	___umodqi3
+___umodqi3:
 	ld	h,0
 	ld	d,0
 	jr	__z80_udivmodhi
@@ -134,9 +138,9 @@ __z80_abshl:
 	ret	z
 	jr	__z80_neghl
 
-; __divhi3:  HL = HL / DE (signed)
-	.globl	__divhi3
-__divhi3:
+; ___divhi3:  HL = HL / DE (signed)
+	.globl	___divhi3
+___divhi3:
 	ld	a,h
 	xor	d		; S = sign of the quotient
 	push	af
@@ -151,9 +155,9 @@ __divhi3:
 	ret	p
 	jr	__z80_neghl
 
-; __modhi3:  HL = HL % DE (signed)
-	.globl	__modhi3
-__modhi3:
+; ___modhi3:  HL = HL % DE (signed)
+	.globl	___modhi3
+___modhi3:
 	ld	a,h
 	or	a		; S = sign of the dividend
 	push	af
@@ -167,8 +171,8 @@ __modhi3:
 	jr	__z80_neghl
 
 ; Sign-extend the 8-bit arguments L and E and use the 16-bit routines.
-	.globl	__divqi3
-__divqi3:
+	.globl	___divqi3
+___divqi3:
 	ld	a,l
 	rla
 	sbc	a,a
@@ -177,10 +181,10 @@ __divqi3:
 	rla
 	sbc	a,a
 	ld	d,a
-	jr	__divhi3
+	jr	___divhi3
 
-	.globl	__modqi3
-__modqi3:
+	.globl	___modqi3
+___modqi3:
 	ld	a,l
 	rla
 	sbc	a,a
@@ -189,7 +193,7 @@ __modqi3:
 	rla
 	sbc	a,a
 	ld	d,a
-	jr	__modhi3
+	jr	___modhi3
 #endif /* L_divmodhi4 */
 
 ; ===========================================================================
@@ -245,11 +249,11 @@ __z80_neg32_mem:
 
 #ifdef L_mulsi3
 ; ---------------------------------------------------------------------------
-; __mulsi3:  a * b  (also correct for signed operands)
+; ___mulsi3:  a * b  (also correct for signed operands)
 ; Shift-and-add over the 32 bits of b, most significant bit first.
 ; ---------------------------------------------------------------------------
-	.globl	__mulsi3
-__mulsi3:
+	.globl	___mulsi3
+___mulsi3:
 	push	ix
 	ld	ix,0
 	add	ix,sp
@@ -348,8 +352,8 @@ __z80_load_quotient:
 	ld	h,(ix+7)
 	ret
 
-	.globl	__udivsi3
-__udivsi3:
+	.globl	___udivsi3
+___udivsi3:
 	push	ix
 	ld	ix,0
 	add	ix,sp
@@ -358,8 +362,8 @@ __udivsi3:
 	pop	ix
 	ret
 
-	.globl	__umodsi3
-__umodsi3:
+	.globl	___umodsi3
+___umodsi3:
 	push	ix
 	ld	ix,0
 	add	ix,sp
@@ -388,8 +392,8 @@ __z80_abs_args32:
 	add	hl,de
 	jp	__z80_neg32_mem
 
-	.globl	__divsi3
-__divsi3:
+	.globl	___divsi3
+___divsi3:
 	push	ix
 	ld	ix,0
 	add	ix,sp
@@ -404,8 +408,8 @@ __divsi3:
 	ret	p
 	jp	__z80_neg32
 
-	.globl	__modsi3
-__modsi3:
+	.globl	___modsi3
+___modsi3:
 	push	ix
 	ld	ix,0
 	add	ix,sp
@@ -445,8 +449,8 @@ __z80_shift_args32:
 	ld	b,a
 	ret
 
-	.globl	__ashlsi3
-__ashlsi3:
+	.globl	___ashlsi3
+___ashlsi3:
 	call	__z80_shift_args32
 	ret	z
 .Lashl32:
@@ -456,8 +460,8 @@ __ashlsi3:
 	djnz	.Lashl32
 	ret
 
-	.globl	__lshrsi3
-__lshrsi3:
+	.globl	___lshrsi3
+___lshrsi3:
 	call	__z80_shift_args32
 	ret	z
 .Llshr32:
@@ -468,8 +472,8 @@ __lshrsi3:
 	djnz	.Llshr32
 	ret
 
-	.globl	__ashrsi3
-__ashrsi3:
+	.globl	___ashrsi3
+___ashrsi3:
 	call	__z80_shift_args32
 	ret	z
 .Lashr32:
@@ -480,3 +484,104 @@ __ashrsi3:
 	djnz	.Lashr32
 	ret
 #endif /* L_shiftsi3 */
+
+#ifdef L_bitopshi
+; ---------------------------------------------------------------------------
+; 16-bit bit operations (int is 16 bits; libgcc2 only provides the 32- and
+; 64-bit variants).  Argument in HL, result in HL.
+; ---------------------------------------------------------------------------
+
+; ___clzhi2:  number of leading zero bits (16 for 0)
+	.globl	___clzhi2
+___clzhi2:
+	ld	e,0
+	ld	a,h
+	or	l
+	jr	z,.Lclz_zero
+.Lclz_loop:
+	bit	7,h
+	jr	nz,.Lclz_done
+	add	hl,hl
+	inc	e
+	jr	.Lclz_loop
+.Lclz_zero:
+	ld	e,16
+.Lclz_done:
+	ld	l,e
+	ld	h,0
+	ret
+
+; ___ctzhi2:  number of trailing zero bits (16 for 0)
+	.globl	___ctzhi2
+___ctzhi2:
+	ld	e,0
+	ld	a,h
+	or	l
+	jr	z,.Lctz_zero
+.Lctz_loop:
+	bit	0,l
+	jr	nz,.Lctz_done
+	srl	h
+	rr	l
+	inc	e
+	jr	.Lctz_loop
+.Lctz_zero:
+	ld	e,16
+.Lctz_done:
+	ld	l,e
+	ld	h,0
+	ret
+
+; ___ffshi2:  1 + index of the least significant set bit, 0 for 0
+	.globl	___ffshi2
+___ffshi2:
+	ld	a,h
+	or	l
+	ret	z
+	call	___ctzhi2
+	inc	hl
+	ret
+
+; ___popcounthi2:  number of set bits
+	.globl	___popcounthi2
+___popcounthi2:
+	ld	e,0
+.Lpop_loop:
+	ld	a,h
+	or	l
+	jr	z,.Lpop_done
+	srl	h
+	rr	l
+	jr	nc,.Lpop_loop
+	inc	e
+	jr	.Lpop_loop
+.Lpop_done:
+	ld	l,e
+	ld	h,0
+	ret
+
+; ___parityhi2:  1 if the number of set bits is odd
+	.globl	___parityhi2
+___parityhi2:
+	call	___popcounthi2
+	ld	a,l
+	and	1
+	ld	l,a
+	ret
+
+; ___clrsbhi2:  number of leading redundant sign bits
+	.globl	___clrsbhi2
+___clrsbhi2:
+	bit	7,h
+	jr	z,.Lclrsb_pos
+	ld	a,h		; negative: count the leading ones
+	cpl
+	ld	h,a
+	ld	a,l
+	cpl
+	ld	l,a
+.Lclrsb_pos:
+	call	___clzhi2
+	dec	hl
+	ret
+#endif /* L_bitopshi */

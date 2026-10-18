@@ -17,6 +17,9 @@
 ;   - .bss is cleared and the constructors in .init_array are run.
 ;   - main () is called; its return value is passed to _exit, which by
 ;     default executes HALT (with the value still in HL).
+;
+; C symbols get a "_" prefix in assembly: main is _main, _exit is __exit.
+; Linker script symbols (__bss_start, _end, ...) have no prefix.
 
 	.section .init,"ax"
 	.globl	_start
@@ -62,15 +65,15 @@ _start:
 	jr	.Linit_loop
 
 .Lmain:
-	call	main
-	jp	_exit
+	call	_main
+	jp	__exit
 
 .Lcall_hl:
 	jp	(hl)
 
 ; Default _exit: stop the CPU, leaving the exit status in HL.
 	.text
-	.weak	_exit
-_exit:
+	.weak	__exit
+__exit:
 	halt
-	jr	_exit
+	jr	__exit

@@ -313,6 +313,12 @@ typedef struct z80_args CUMULATIVE_ARGS;
 /* ------------------------------------------------------------------------- */
 
 #define ASM_COMMENT_START ";"
+
+/* C symbols get a "_" prefix: the z80 assembler treats names like "i",
+   "a" or "hl" as registers, so a C variable "i" could not be used
+   otherwise.  (SDCC and z88dk do the same.)  */
+#undef USER_LABEL_PREFIX
+#define USER_LABEL_PREFIX "_"
 #define ASM_APP_ON ""
 #define ASM_APP_OFF ""
 

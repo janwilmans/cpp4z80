@@ -24,7 +24,7 @@ int main (void)
   for (int n = 0; n < 3; n++)
     {
       __asm__ volatile ("ld bc,0x1234\n\tld de,0x5678\n\tld hl,0x9abc\n\t"
-			"call isr"
+			"call _isr"
 			: "=b" (bc), "=d" (de), "=h" (hl)
 			:
 			: "a", "iyl", "iyh", "memory");

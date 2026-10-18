@@ -82,12 +82,13 @@ kill (int pid, int sig)
   return -1;
 }
 
-extern char _end[];
+/* The linker script symbol _end (C symbols get a "_" prefix).  */
+extern char program_end[] __asm__ ("_end");
 
 void *
 sbrk (ptrdiff_t increment)
 {
-  static char *brk = _end;
+  static char *brk = program_end;
   char *old = brk;
   char sp_probe;
 

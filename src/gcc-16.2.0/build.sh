@@ -6,6 +6,10 @@ cd ~/project/cpp4z80/src/build-z80
     --prefix="$HOME/project/cpp4z80/install" \
     --target=z80-elf \
     --enable-languages=c,c++ \
+    --with-newlib \
+    --disable-hosted-libstdcxx \
+    --disable-libstdcxx-verbose \
+    --disable-wchar_t \
     --disable-nls \
     --disable-werror \
     CFLAGS="-O0 -g3" \

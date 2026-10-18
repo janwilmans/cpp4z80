@@ -14,6 +14,8 @@ scripts/make-gcc.sh            # rebuild the compiler after backend changes
 scripts/make-libgcc.sh         # (re)build libgcc with that compiler
 scripts/install-gcc.sh         # install compiler + libgcc into install/
 scripts/build-newlib.sh        # build and install newlib (C library)
+scripts/make-libstdcxx.sh      # build the freestanding C++ library
+scripts/build-toolchain.sh     # all of the above, in order
 tests/run_tests.py             # run everything
 tests/run_tests.py -v -O 0 tests/c/007_stack_args.c   # one test, show asm
 ```
@@ -32,6 +34,9 @@ link them:
 - newlib's `libc.a` / `libm.a` (built by `scripts/build-newlib.sh` with this
   compiler), with `support/sys.c` as system layer: console output goes to
   I/O port 1, which the emulator captures; the heap starts at `_end`.
+- for C++: the freestanding libstdc++ (`<array>`, `<algorithm>`,
+  `<optional>`, `<variant>`, `<span>`, ...; no iostreams), compiled with
+  `-fno-exceptions -fno-rtti -std=gnu++23`.
 - the default z80-elf linker script (program at 0x100).
 
 The emulator fills memory with 0xA5 before loading the program, so a missing

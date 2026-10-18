@@ -3,12 +3,13 @@
 ; Arguments: the first in HL, the second in DE; the result in HL.
 ; Only IX is preserved across calls, so a jmp_buf holds three words:
 ;   [0] return address, [1] SP after returning from setjmp, [2] IX.
+; C symbols get a "_" prefix in assembly.
 
 	.text
 
 ; int setjmp (jmp_buf env)
-	.globl	setjmp
-setjmp:
+	.globl	_setjmp
+_setjmp:
 	pop	bc		; BC = return address, SP = caller's SP
 	ld	(hl),c
 	inc	hl
@@ -32,8 +33,8 @@ setjmp:
 	ret
 
 ; void longjmp (jmp_buf env, int val)
-	.globl	longjmp
-longjmp:
+	.globl	_longjmp
+_longjmp:
 	ld	a,d
 	or	e
 	jr	nz,.Lnonzero

@@ -64,6 +64,10 @@ LIBGCC_DIR = os.path.join(ROOT, "src", "build-z80", "z80-elf", "libgcc")
 
 NEWLIB = os.path.join(ROOT, "install", "z80-elf")
 NEWLIB_FLAGS = ["-isystem", os.path.join(NEWLIB, "include")]
+# The freestanding libstdc++ headers (installed by scripts/make-libstdcxx.sh).
+CXX_INCLUDE = os.path.join(NEWLIB, "include", "c++", "16.2.0")
+CXX_FLAGS = ["-isystem", CXX_INCLUDE,
+             "-isystem", os.path.join(CXX_INCLUDE, "z80-elf")]
 
 
 def support_objects(outdir):
@@ -147,9 +151,13 @@ def run_test(path, opt, support):
     elf = os.path.join(workdir, name + ".elf")
 
     cflags = [opt, "-ffreestanding", "-fno-builtin"]
+    libs = []
+    incs = NEWLIB_FLAGS
     if lang == "c++":
-        cflags += ["-fno-exceptions", "-fno-rtti"]
-    run(XGCC + NEWLIB_FLAGS + ["-x", lang, "-S", "-o", asm] + cflags + [path],
+        cflags += ["-fno-exceptions", "-fno-rtti", "-std=gnu++23"]
+        incs = CXX_FLAGS + NEWLIB_FLAGS
+        libs = ["-lstdc++"]
+    run(XGCC + incs + ["-x", lang, "-S", "-o", asm] + cflags + [path],
         "compile")
     run([AS, "-o", obj, asm], "assemble")
     # Link through the compiler driver: crt0.o and libgcc.a come from the
@@ -158,7 +166,7 @@ def run_test(path, opt, support):
                 "-L" + os.path.join(NEWLIB, "lib"),
                 "-Wl,--no-warn-rwx-segments",
                 "-Wl,-Map," + os.path.join(workdir, name + ".map"),
-                "-o", elf, obj] + support, "link")
+                "-o", elf, obj] + support + libs, "link")
     return execute(elf), asm
 
 

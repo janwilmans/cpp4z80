@@ -461,6 +461,14 @@
 #define __SMALL_BITFIELDS	/* 16 Bit INT */
 #endif
 
+#ifdef __z80__
+#define __IEEE_LITTLE_ENDIAN
+#define __SMALL_BITFIELDS	/* 16 Bit INT */
+#if __SIZEOF_DOUBLE__ == 4
+#define _DOUBLE_IS_32BITS
+#endif
+#endif
+
 #ifdef __PRU__
 #define __IEEE_LITTLE_ENDIAN
 #endif

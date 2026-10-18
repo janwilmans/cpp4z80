@@ -378,6 +378,12 @@ _BEGIN_STD_C
 #define _JBTYPE unsigned short
 #endif /* __m32c__ */
 
+#ifdef __z80__
+/* Return address, SP and IX (the only callee-saved register).  */
+#define _JBLEN 3
+#define _JBTYPE unsigned short
+#endif
+
 #ifdef __MSP430__
 #define _JBLEN 9
 

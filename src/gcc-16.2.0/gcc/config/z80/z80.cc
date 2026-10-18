@@ -471,8 +471,10 @@ z80_print_operand (FILE *file, rtx x, int code)
 	  val &= 0xff;
 	else if (code == 'H')
 	  val = (val >> 8) & 0xff;
-	else if (GET_MODE_SIZE (GET_MODE (x)) <= 2)
-	  val &= 0xffff;
+	else
+	  /* Print as a signed 16-bit value: GCC sign-extends constants to
+	     their mode, so an 8-bit -2 must stay -2 (not 65534).  */
+	  val = trunc_int_for_mode (val, HImode);
 	fprintf (file, HOST_WIDE_INT_PRINT_DEC, val);
 	return;
       }
@@ -1411,6 +1413,34 @@ z80_rtx_costs (rtx x, machine_mode mode, int outer_code, int,
 }
 
 /* ------------------------------------------------------------------------- */
+/* Types                                                                     */
+/* ------------------------------------------------------------------------- */
+
+/* Implement TARGET_C_MODE_FOR_FLOATING_TYPE.  double and long double are
+   32-bit (the same format as float), as usual for 8-bit targets: 64-bit
+   soft float is too big and slow to be useful on a Z80.  */
+
+static machine_mode
+z80_c_mode_for_floating_type (enum tree_index ti)
+{
+  if (ti == TI_DOUBLE_TYPE || ti == TI_LONG_DOUBLE_TYPE)
+    return SFmode;
+  return default_mode_for_floating_type (ti);
+}
+
+/* Implement TARGET_SCALAR_MODE_SUPPORTED_P.  DFmode is no longer the mode
+   of any C type, but keep it available (__attribute__ ((mode (DF))), with
+   the soft-float routines in libgcc).  */
+
+static bool
+z80_scalar_mode_supported_p (scalar_mode mode)
+{
+  if (mode == DFmode)
+    return true;
+  return default_scalar_mode_supported_p (mode);
+}
+
+/* ------------------------------------------------------------------------- */
 /* Target hooks                                                              */
 /* ------------------------------------------------------------------------- */
 
@@ -1451,6 +1481,11 @@ z80_rtx_costs (rtx x, machine_mode mode, int outer_code, int,
 #define TARGET_FUNCTION_VALUE_REGNO_P z80_function_value_regno_p
 #undef TARGET_RETURN_IN_MEMORY
 #define TARGET_RETURN_IN_MEMORY z80_return_in_memory
+
+#undef TARGET_C_MODE_FOR_FLOATING_TYPE
+#define TARGET_C_MODE_FOR_FLOATING_TYPE z80_c_mode_for_floating_type
+#undef TARGET_SCALAR_MODE_SUPPORTED_P
+#define TARGET_SCALAR_MODE_SUPPORTED_P z80_scalar_mode_supported_p
 
 /* Constructors and destructors go into .init_array / .fini_array, which
    crt0 walks (there are no crtbegin/crtend files).  */

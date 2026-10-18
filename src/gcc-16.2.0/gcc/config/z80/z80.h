@@ -157,7 +157,7 @@
 /* Prefer the registers that are not used for argument passing first, and
    keep A last: it is needed by almost every 8-bit ALU instruction.  */
 #define REG_ALLOC_ORDER                                                        \
-  {C_REG, B_REG, E_REG, D_REG, L_REG, H_REG, A_REG, IXL_REG, IXH_REG,         \
+  {A_REG, L_REG, H_REG, E_REG, D_REG, C_REG, B_REG, IXL_REG, IXH_REG,         \
    IYL_REG, IYH_REG, SP_REG, FP_REG, AP_REG}
 
 /* ------------------------------------------------------------------------- */

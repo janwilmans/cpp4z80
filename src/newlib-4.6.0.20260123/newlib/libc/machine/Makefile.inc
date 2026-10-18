@@ -172,6 +172,9 @@ endif
 if HAVE_LIBC_MACHINE_XSTORMY16
 include %D%/xstormy16/Makefile.inc
 endif
+if HAVE_LIBC_MACHINE_Z80
+include %D%/z80/Makefile.inc
+endif
 if HAVE_LIBC_MACHINE_XTENSA
 include %D%/xtensa/Makefile.inc
 endif

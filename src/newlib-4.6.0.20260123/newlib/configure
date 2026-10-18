@@ -641,6 +641,8 @@ HAVE_FPMATH_H_FALSE
 HAVE_FPMATH_H_TRUE
 HAVE_LIBC_MACHINE_Z8K_FALSE
 HAVE_LIBC_MACHINE_Z8K_TRUE
+HAVE_LIBC_MACHINE_Z80_FALSE
+HAVE_LIBC_MACHINE_Z80_TRUE
 HAVE_LIBC_MACHINE_XTENSA_FALSE
 HAVE_LIBC_MACHINE_XTENSA_TRUE
 HAVE_LIBC_MACHINE_XSTORMY16_FALSE
@@ -6177,6 +6179,13 @@ else
   HAVE_LIBC_MACHINE_XTENSA_TRUE='#'
   HAVE_LIBC_MACHINE_XTENSA_FALSE=
 fi
+ if test "${machine_dir}" = z80; then
+  HAVE_LIBC_MACHINE_Z80_TRUE=
+  HAVE_LIBC_MACHINE_Z80_FALSE='#'
+else
+  HAVE_LIBC_MACHINE_Z80_TRUE='#'
+  HAVE_LIBC_MACHINE_Z80_FALSE=
+fi
  if test "${machine_dir}" = z8k; then
   HAVE_LIBC_MACHINE_Z8K_TRUE=
   HAVE_LIBC_MACHINE_Z8K_FALSE='#'
@@ -8039,6 +8048,10 @@ Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
 if test -z "${HAVE_LIBC_MACHINE_XTENSA_TRUE}" && test -z "${HAVE_LIBC_MACHINE_XTENSA_FALSE}"; then
   as_fn_error $? "conditional \"HAVE_LIBC_MACHINE_XTENSA\" was never defined.
+Usually this means the macro was only invoked conditionally." "$LINENO" 5
+fi
+if test -z "${HAVE_LIBC_MACHINE_Z80_TRUE}" && test -z "${HAVE_LIBC_MACHINE_Z80_FALSE}"; then
+  as_fn_error $? "conditional \"HAVE_LIBC_MACHINE_Z80\" was never defined.
 Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
 if test -z "${HAVE_LIBC_MACHINE_Z8K_TRUE}" && test -z "${HAVE_LIBC_MACHINE_Z8K_FALSE}"; then

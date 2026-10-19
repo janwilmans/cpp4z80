@@ -43,6 +43,11 @@
 #undef ENDFILE_SPEC
 #define ENDFILE_SPEC ""
 
+/* A flat 64K memory image with code and data in one RWX segment is
+   normal for a Z80; do not warn about it.  */
+#undef LINK_SPEC
+#define LINK_SPEC "%{!r:--no-warn-rwx-segments}"
+
 /* ------------------------------------------------------------------------- */
 /* Storage layout                                                            */
 /* ------------------------------------------------------------------------- */

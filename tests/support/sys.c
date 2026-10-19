@@ -7,6 +7,10 @@
    newlib is configured with MISSING_SYSCALL_NAMES, so it calls write(),
    sbrk() etc.; the underscore names are provided as aliases.  */
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <errno.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -25,7 +29,7 @@ console_putc (char c)
 int
 write (int fd, const void *buf, int len)
 {
-  const char *p = buf;
+  const char *p = (const char *) buf;
   (void) fd;
   for (int i = 0; i < len; i++)
     console_putc (p[i]);
@@ -102,7 +106,11 @@ sbrk (ptrdiff_t increment)
   return old;
 }
 
+#ifdef __cplusplus
+#define ALIAS(name)
+#else
 #define ALIAS(name) __typeof__ (name) _##name __attribute__ ((alias (#name)))
+#endif
 ALIAS (write);
 ALIAS (read);
 ALIAS (close);
@@ -112,3 +120,7 @@ ALIAS (isatty);
 ALIAS (getpid);
 ALIAS (kill);
 ALIAS (sbrk);
+
+#ifdef __cplusplus
+}
+#endif

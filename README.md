@@ -40,6 +40,9 @@ program at `-O0`, `-O1`, `-O2` and `-Os` in a Z80 emulator):
 - `__attribute__ ((interrupt))` (saves the registers it uses, returns with
   `ei` / `reti`), `__attribute__ ((nmi))` (`retn`) and
   `__attribute__ ((naked))`; inline assembly with register constraints.
+- `<z80intrin.h>`: `z80_in`/`z80_out` (16-bit port in BC),
+  `Z80_IN`/`Z80_OUT` (constant 8-bit port), `z80_di`, `z80_ei`,
+  `z80_im`, `z80_halt`, `z80_nop`.
 
 Not (yet) supported: C++ exceptions and RTTI, the hosted C++ library,
 code banking, the undocumented IXH/IXL/IYH/IYL instructions, Z80 variants
@@ -103,6 +106,7 @@ See [tests/README.md](tests/README.md) for how the tests work.
 | path | contents |
 |------|----------|
 | `src/gcc-16.2.0/gcc/config/z80/` | the backend: `z80.h` (registers, ABI, layout), `z80.md` (instruction patterns), `z80.cc` (output code, costs, prologue/epilogue, ...), `constraints.md` |
+| `src/gcc-16.2.0/gcc/config/z80/z80intrin.h` | intrinsics header (`#include <z80intrin.h>`) |
 | `src/gcc-16.2.0/libgcc/config/z80/` | `lib1funcs.S` (multiply, divide, shifts, bit operations), `crt0.S`, `t-z80` |
 | `src/newlib-4.6.0.20260123/newlib/libc/machine/z80/` | `setjmp.S` |
 | `tests/` | test programs and the test harness |

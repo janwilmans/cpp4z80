@@ -146,6 +146,13 @@ def execute(elf):
             output.append(value)
 
     machine.set_output_callback(on_output)
+
+    # Input: port 2 returns 0x42, any other port the high byte of the
+    # 16-bit port address (to check what was put on the address bus).
+    def on_input(port):
+        return 0x42 if port & 0xff == 2 else port >> 8
+
+    machine.set_input_callback(on_input)
     # run() also returns on internal events (e.g. the end of a video
     # frame), so keep going until HALT or until the tick budget is spent.
     machine.ticks_to_stop = MAX_TICKS

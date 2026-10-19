@@ -3313,6 +3313,7 @@ z80-*-elf*)
 	cpu_type=z80
 	tmake_file="z80/t-z80"
 	tm_file="elfos.h z80/z80.h newlib-stdint.h"
+	extra_headers="z80intrin.h"
 	target_has_targetm_common=no
 	;;
 rl78-*-elf*)

@@ -197,3 +197,6 @@ endif
 if CONFIG_XTENSA
 include xtensa/Makefile.inc
 endif
+if CONFIG_Z80
+include z80/Makefile.inc
+endif

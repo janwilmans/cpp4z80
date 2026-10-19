@@ -61,6 +61,19 @@ program at `-O0`, `-O1`, `-O2` and `-Os` in a Z80 emulator):
 - Make IY available to the register allocator as a fourth register pair, so
   that fewer values are spilled to the stack.
 
+## MSX-DOS programs
+
+`-specs=msxdos.specs` links a program as an MSX-DOS / CP/M `.com` file, with
+console I/O, command line arguments and exit codes through the BDOS:
+
+```sh
+z80-elf-g++ -Os -fno-exceptions -fno-rtti -specs=msxdos.specs main.cpp -o example.elf
+z80-elf-objcopy -O binary example.elf example.com
+```
+
+See [docs/msx-dos.md](docs/msx-dos.md) for installing the toolchain and
+building `.com` programs.
+
 ## Calling convention
 
 | what                              | where                                     |
@@ -122,6 +135,7 @@ See [tests/README.md](tests/README.md) for how the tests work.
 | `src/gcc-16.2.0/gcc/config/z80/z80intrin.h` | intrinsics header (`#include <z80intrin.h>`) |
 | `src/gcc-16.2.0/libgcc/config/z80/` | `lib1funcs.S` (multiply, divide, shifts, bit operations), `crt0.S`, `t-z80` |
 | `src/newlib-4.6.0.20260123/newlib/libc/machine/z80/` | `setjmp.S` |
+| `src/newlib-4.6.0.20260123/libgloss/z80/` | MSX-DOS support: `crt0-msxdos.S`, BDOS system calls, `msxdos.ld`, `msxdos.specs` |
 | `tests/` | test programs and the test harness |
 | `scripts/` | build and measurement helpers |
 

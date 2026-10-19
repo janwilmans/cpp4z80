@@ -2,3 +2,4 @@ install/
 work/
 src/build-*/
 src/*.log
+__pycache__/

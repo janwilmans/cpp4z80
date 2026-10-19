@@ -1,0 +1,15 @@
+# Link for MSX-DOS / CP/M .com programs:
+#   z80-elf-gcc -specs=msxdos.specs ... -o prog.elf
+#   z80-elf-objcopy -O binary prog.elf prog.com
+
+%rename link msxdos_link
+%rename lib msxdos_lib
+
+*startfile:
+crt0-msxdos.o%s
+
+*link:
+-T msxdos.ld%s --gc-sections %(msxdos_link)
+
+*lib:
+--start-group -lc -lmsxdos --end-group

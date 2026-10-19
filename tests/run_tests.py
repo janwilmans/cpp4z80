@@ -11,10 +11,20 @@ levels it is run at:
 
     // opts: -O0 -O2
 
+"// output: text" lines give the expected console output (one line each),
+"// input: text" lines the console input (for --target msxdos) and
+"// args: A B" the command line arguments (for --target msxdos).
+
+Targets (--target):
+  bare    (default) crt0.o from libgcc, the default linker script, and
+          tests/support/sys.c as system layer (console on I/O port 1).
+  msxdos  -specs=msxdos.specs: the program is a .com file running under
+          an emulated MSX-DOS (BDOS calls at 0x0005); main's result is the
+          program's exit code (only its low byte is checked).
+
 Each test is compiled with the freshly built cross compiler, assembled with
-the z80-elf binutils and linked through the compiler driver (crt0.o and
-libgcc.a from the libgcc build, the default linker script) together with
-tests/support/libc.s, and run in the `z80` Python emulator.
+the z80-elf binutils, linked through the compiler driver with libgcc,
+newlib (and libstdc++ for C++) and run in the `z80` Python emulator.
 
 Usage:  tests/run_tests.py [-v] [-O LEVEL ...] [test files...]
 """
@@ -112,9 +122,12 @@ def parse_spec(path):
     opts = m.group(1).split() if m else None
     # "// output: text" lines give the expected console output, one line
     # of output each.
-    lines = re.findall(r"^//\s*output:\s?(.*)$", text, re.M)
+    lines = re.findall(r"^//[ \t]*output:[ \t]?(.*)$", text, re.M)
     output = "".join(line + "\n" for line in lines) if lines else None
-    return expect, opts, output
+    inputs = re.findall(r"^//[ \t]*input:[ \t]?(.*)$", text, re.M)
+    m = re.search(r"^//[ \t]*args:[ \t]*(.*)$", text, re.M)
+    cmdline = m.group(1).strip() if m else ""
+    return expect, opts, output, inputs, cmdline
 
 
 def exit_address(elf):
@@ -166,10 +179,125 @@ def execute(elf):
     return machine.hl, output.decode("latin-1"), ticks
 
 
-def run_test(path, opt, support):
+# Emulated MSX-DOS: where the BDOS entry point and the warm boot trap are.
+BDOS_ENTRY = 0xda00
+WBOOT_TRAP = 0xda03
+
+
+class ProgramExit(Exception):
+    def __init__(self, code):
+        super().__init__(code)
+        self.code = code
+
+
+def execute_msxdos(elf, inputs, cmdline):
+    """Run a .com program (as ELF) under a minimal emulated MSX-DOS."""
+    import z80
+
+    image, entry = load_elf(elf)
+    memory = bytearray(image)
+    memory[0:0x100] = bytes(0x100)
+    memory[0:3] = bytes([0xc3, WBOOT_TRAP & 0xff, WBOOT_TRAP >> 8])
+    memory[5:8] = bytes([0xc3, BDOS_ENTRY & 0xff, BDOS_ENTRY >> 8])
+    tail = (" " + cmdline if cmdline else "").encode("latin-1")[:127]
+    memory[0x80] = len(tail)
+    memory[0x81:0x81 + len(tail)] = tail
+    memory[0x81 + len(tail)] = 0x0d
+
+    machine = z80.Z80Machine()
+    machine.set_memory_block(0, bytes(memory))
+    machine.pc = entry
+    machine.set_breakpoint(BDOS_ENTRY)
+    machine.set_breakpoint(WBOOT_TRAP)
+    mem = machine.memory
+    output = bytearray()
+    pending = list(inputs)
+    chars = bytearray()
+
+    def on_output(port, value):
+        if port & 0xff == 1:
+            output.append(value)
+
+    machine.set_output_callback(on_output)
+    # The same test hardware as for the bare target (see execute).
+    machine.set_input_callback(
+        lambda port: 0x42 if port & 0xff == 2 else port >> 8)
+
+    def next_line():
+        return pending.pop(0).encode("latin-1") if pending else None
+
+    def bdos():
+        f, de = machine.c, machine.de
+        if f == 0:
+            raise ProgramExit(0)
+        if f == 0x62:			# MSX-DOS 2 _TERM
+            raise ProgramExit(machine.b)
+        if f == 1:			# console input with echo
+            if not chars:
+                line = next_line()
+                chars.extend(b"\x1a" if line is None else line + b"\r")
+            c = chars.pop(0)
+            output.append(c)
+            machine.a = machine.l = c
+        elif f == 2:			# console output
+            output.append(machine.e)
+        elif f == 6:			# direct console I/O
+            if machine.e == 0xff:
+                machine.a = chars.pop(0) if chars else 0
+            else:
+                output.append(machine.e)
+        elif f == 9:			# output string until '$'
+            while mem[de] != ord("$"):
+                output.append(mem[de])
+                de = (de + 1) & 0xffff
+        elif f == 10:			# buffered line input (echoed)
+            line = next_line()
+            echo = line is not None
+            line = b"\x1a" if line is None else line[:mem[de]]
+            mem[de + 1] = len(line)
+            for i, c in enumerate(line):
+                mem[de + 2 + i] = c
+            if echo:
+                output.extend(line)
+            output.append(0x0d)
+        elif f == 11:			# console status
+            machine.a = 0xff if chars else 0
+        elif f == 12:			# version: CP/M 2.2
+            machine.a = machine.l = 0x22
+            machine.b = machine.h = 0
+        else:
+            raise TestError("bdos", "unsupported BDOS function 0x%02x" % f)
+        # Return to the caller.
+        sp = machine.sp
+        machine.pc = mem[sp] | (mem[sp + 1] << 8)
+        machine.sp = (sp + 2) & 0xffff
+
+    machine.ticks_to_stop = MAX_TICKS
+    try:
+        while machine.ticks_to_stop > 0:
+            machine.run()
+            if machine.pc == BDOS_ENTRY:
+                bdos()
+            elif machine.pc == WBOOT_TRAP:
+                raise ProgramExit(0)
+            elif machine.halted:
+                raise TestError("run", "HALT at pc=0x%04x" % machine.pc)
+        raise TestError("run", "did not exit within %d ticks (pc=0x%04x)"
+                        % (MAX_TICKS, machine.pc))
+    except ProgramExit as e:
+        code = e.code
+    ticks = MAX_TICKS - machine.ticks_to_stop
+    # As seen on the screen: CR LF is a new line, a lone CR only returns
+    # the cursor.
+    text = output.decode("latin-1").replace("\r\n", "\n").replace("\r", "")
+    return code, text, ticks
+
+
+def run_test(path, opt, support, target="bare", inputs=(), cmdline=""):
     name = os.path.splitext(os.path.basename(path))[0]
     lang = "c++" if path.endswith(".cpp") else "c"
-    workdir = os.path.join(OUT, "%s-%s%s" % (lang, name, opt))
+    workdir = os.path.join(OUT, "%s%s-%s%s" % (
+        "" if target == "bare" else target + "-", lang, name, opt))
     os.makedirs(workdir, exist_ok=True)
     asm = os.path.join(workdir, name + ".s")
     obj = os.path.join(workdir, name + ".o")
@@ -187,11 +315,17 @@ def run_test(path, opt, support):
     run([AS, "-o", obj, asm], "assemble")
     # Link through the compiler driver: crt0.o and libgcc.a come from the
     # libgcc build directory, the default linker script is used.
-    run(XGCC + ["-B" + LIBGCC_DIR + "/", "-L" + LIBGCC_DIR,
-                "-L" + os.path.join(NEWLIB, "lib"),
-                "-Wl,--no-warn-rwx-segments",
-                "-Wl,-Map," + os.path.join(workdir, name + ".map"),
-                "-o", elf, obj] + support + libs, "link")
+    link = XGCC + ["-B" + LIBGCC_DIR + "/", "-L" + LIBGCC_DIR,
+                   "-L" + os.path.join(NEWLIB, "lib"),
+                   "-Wl,-Map," + os.path.join(workdir, name + ".map"),
+                   "-o", elf, obj]
+    if target == "msxdos":
+        # The board support files (specs, crt0, linker script) are found
+        # through the -B prefix, as the installed driver finds them.
+        run(link + ["-B" + os.path.join(NEWLIB, "lib") + "/",
+                    "-specs=msxdos.specs"] + libs, "link")
+        return execute_msxdos(elf, inputs, cmdline), asm
+    run(link + support + libs, "link")
     return execute(elf), asm
 
 
@@ -216,6 +350,9 @@ def main():
                         help="report the total executed T-states per level")
     parser.add_argument("--benchmark", action="store_true",
                         help="run the tests listed in tests/benchmark.txt")
+    parser.add_argument("--target", choices=["bare", "msxdos"],
+                        default="bare",
+                        help="how programs are linked and run (see above)")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="print the generated assembly of failing tests")
     args = parser.parse_args()
@@ -224,20 +361,22 @@ def main():
         with open(os.path.join(TESTS, "benchmark.txt")) as f:
             args.tests = [os.path.join(TESTS, line.strip()) for line in f
                           if line.strip()]
-    tests = args.tests or sorted(glob.glob(os.path.join(TESTS, "c", "*.c"))
-                                 + glob.glob(os.path.join(TESTS, "cpp",
-                                                          "*.cpp")))
+    dirs = ["c", "cpp"] + (["msxdos"] if args.target == "msxdos" else [])
+    tests = args.tests or sorted(
+        f for d in dirs for f in glob.glob(os.path.join(TESTS, d, "*.c*")))
     levels = ["-O" + o for o in args.opts] if args.opts else None
 
     os.makedirs(OUT, exist_ok=True)
-    support = support_objects(OUT)
+    support = support_objects(OUT) if args.target == "bare" else []
+    mask = 0xff if args.target == "msxdos" else 0xffff
 
     passed = failed = 0
     total_ticks = {}
     for path in tests:
         rel = os.path.relpath(path, TESTS)
         try:
-            expect, test_opts, expect_output = parse_spec(path)
+            expect, test_opts, expect_output, inputs, cmdline = \
+                parse_spec(path)
         except TestError as e:
             print("FAIL %-32s %s" % (rel, e))
             failed += 1
@@ -246,12 +385,13 @@ def main():
             label = "%-32s %-4s" % (rel, opt)
             asm = None
             try:
-                (result, output, ticks), asm = run_test(path, opt, support)
+                (result, output, ticks), asm = run_test(
+                    path, opt, support, args.target, inputs, cmdline)
                 total_ticks[opt] = total_ticks.get(opt, 0) + ticks
                 if expect_output is not None and output != expect_output:
                     msg = "output %r, expected %r" % (output, expect_output)
                     raise TestError("output", msg)
-                if result == expect & 0xffff:
+                if result & mask == expect & mask:
                     print("PASS " + label)
                     passed += 1
                     continue

@@ -372,6 +372,7 @@ case "${host_cpu}" in
   z80)
 	machine_dir=z80
 	newlib_cflags="${newlib_cflags} -DPREFER_SIZE_OVER_SPEED -DSMALL_MEMORY"
+	newlib_cflags="${newlib_cflags} -ffunction-sections -fdata-sections"
 	default_newlib_nano_malloc="yes"
 	;;
   xtensa)

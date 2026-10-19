@@ -8,6 +8,14 @@ program halts) must equal the value in the file's `// expect:` line.
 Optional `// output: text` lines give the expected console output (one line
 each), e.g. from `printf`.
 
+`tests/run_tests.py --target msxdos` links every program with
+`-specs=msxdos.specs` and runs it as a `.com` file under an emulated
+MSX-DOS (BDOS calls through 0x0005 are handled by the harness); `main`'s
+result is then the exit code, of which only the low byte is checked.
+`tests/msxdos/` holds tests for this target only; they can also give
+console input (`// input: text`, one line each) and command line
+arguments (`// args: ONE TWO`).
+
 ```sh
 scripts/setup-test-env.sh      # once: binutils + emulator venv
 scripts/make-gcc.sh            # rebuild the compiler after backend changes

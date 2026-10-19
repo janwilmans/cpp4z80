@@ -650,6 +650,8 @@ CPPFLAGS
 LDFLAGS
 CFLAGS
 CC
+CONFIG_Z80_FALSE
+CONFIG_Z80_TRUE
 CONFIG_XTENSA_FALSE
 CONFIG_XTENSA_TRUE
 CONFIG_XSTORMY16_FALSE
@@ -2964,6 +2966,9 @@ case "${target}" in
   xtensa-*-*)
 	config_xtensa=true
 	;;
+  z80-*-*)
+	config_z80=true
+	;;
   m32c-*-*)
 	ac_config_files="$ac_config_files m32c/Makefile"
 
@@ -3319,6 +3324,14 @@ fi
 else
   CONFIG_XTENSA_TRUE='#'
   CONFIG_XTENSA_FALSE=
+fi
+
+   if test x$config_z80 = xtrue; then
+  CONFIG_Z80_TRUE=
+  CONFIG_Z80_FALSE='#'
+else
+  CONFIG_Z80_TRUE='#'
+  CONFIG_Z80_FALSE=
 fi
 
 
@@ -5973,6 +5986,10 @@ Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
 if test -z "${CONFIG_XTENSA_TRUE}" && test -z "${CONFIG_XTENSA_FALSE}"; then
   as_fn_error $? "conditional \"CONFIG_XTENSA\" was never defined.
+Usually this means the macro was only invoked conditionally." "$LINENO" 5
+fi
+if test -z "${CONFIG_Z80_TRUE}" && test -z "${CONFIG_Z80_FALSE}"; then
+  as_fn_error $? "conditional \"CONFIG_Z80\" was never defined.
 Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
 if test -z "${AMDEP_TRUE}" && test -z "${AMDEP_FALSE}"; then

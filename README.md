@@ -44,9 +44,22 @@ program at `-O0`, `-O1`, `-O2` and `-Os` in a Z80 emulator):
   `Z80_IN`/`Z80_OUT` (constant 8-bit port), `z80_di`, `z80_ei`,
   `z80_im`, `z80_halt`, `z80_nop`.
 
-Not (yet) supported: C++ exceptions and RTTI, the hosted C++ library,
-code banking, the undocumented IXH/IXL/IYH/IYL instructions, Z80 variants
-(Z180, eZ80, R800, ...).
+### Not (yet) supported
+
+- C++ exceptions and RTTI (compile C++ with `-fno-exceptions -fno-rtti`).
+- The hosted C++ library: iostreams, `std::string`, the containers.
+- Code banking.
+- The undocumented IXH/IXL/IYH/IYL instructions.
+- Z80 variants (Z180, eZ80, R800, ...).
+
+### Possible next steps
+
+- C++ exceptions using setjmp/longjmp-based (SJLJ) unwinding, which needs no
+  DWARF unwind tables.
+- Pass a third argument in BC, so that fewer calls need stack pushes and
+  stack cleanup.
+- Make IY available to the register allocator as a fourth register pair, so
+  that fewer values are spilled to the stack.
 
 ## Calling convention
 

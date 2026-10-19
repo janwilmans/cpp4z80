@@ -36,6 +36,7 @@ OUT = os.path.join(ROOT, "work", "test-out")
 
 XGCC = [os.path.join(GCC_BUILD, "xgcc"), "-B" + GCC_BUILD + "/"]
 AS = os.path.join(BINUTILS, "z80-elf-as")
+NM = os.path.join(BINUTILS, "z80-elf-nm")
 
 DEFAULT_OPTS = ["-O0", "-O1", "-O2", "-Os"]
 # The emulator is fast (10^9 ticks take about a second), so be generous.
@@ -116,6 +117,16 @@ def parse_spec(path):
     return expect, opts, output
 
 
+def exit_address(elf):
+    """Address of _exit (assembly name __exit), where crt0's HALT is."""
+    proc = run([NM, elf], "nm")
+    for line in proc.stdout.splitlines():
+        parts = line.split()
+        if len(parts) == 3 and parts[2] == "__exit":
+            return int(parts[0], 16)
+    return None
+
+
 def execute(elf):
     import z80
 
@@ -123,6 +134,11 @@ def execute(elf):
     machine = z80.Z80Machine()
     machine.set_memory_block(0, memory)
     machine.pc = entry
+    # Stop exactly at _exit: after a HALT the emulator keeps spending
+    # T-states until the end of its frame, which would distort the count.
+    stop = exit_address(elf)
+    if stop is not None:
+        machine.set_breakpoint(stop)
     output = bytearray()
 
     def on_output(port, value):
@@ -133,12 +149,14 @@ def execute(elf):
     # run() also returns on internal events (e.g. the end of a video
     # frame), so keep going until HALT or until the tick budget is spent.
     machine.ticks_to_stop = MAX_TICKS
-    while not machine.halted and machine.ticks_to_stop > 0:
+    while (not machine.halted and machine.ticks_to_stop > 0
+           and machine.pc != stop):
         machine.run()
-    if not machine.halted:
+    if not machine.halted and machine.pc != stop:
         raise TestError("run", "did not halt within %d ticks (pc=0x%04x)"
                         % (MAX_TICKS, machine.pc))
-    return machine.hl, output.decode("latin-1")
+    ticks = MAX_TICKS - machine.ticks_to_stop
+    return machine.hl, output.decode("latin-1"), ticks
 
 
 def run_test(path, opt, support):
@@ -187,6 +205,8 @@ def main():
     parser.add_argument("tests", nargs="*", help="test files (default: all)")
     parser.add_argument("-O", dest="opts", action="append",
                         help="optimisation level(s) to test, e.g. -O 0")
+    parser.add_argument("--ticks", action="store_true",
+                        help="report the total executed T-states per level")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="print the generated assembly of failing tests")
     args = parser.parse_args()
@@ -200,6 +220,7 @@ def main():
     support = support_objects(OUT)
 
     passed = failed = 0
+    total_ticks = {}
     for path in tests:
         rel = os.path.relpath(path, TESTS)
         try:
@@ -212,7 +233,8 @@ def main():
             label = "%-32s %-4s" % (rel, opt)
             asm = None
             try:
-                (result, output), asm = run_test(path, opt, support)
+                (result, output, ticks), asm = run_test(path, opt, support)
+                total_ticks[opt] = total_ticks.get(opt, 0) + ticks
                 if expect_output is not None and output != expect_output:
                     msg = "output %r, expected %r" % (output, expect_output)
                     raise TestError("output", msg)
@@ -235,6 +257,9 @@ def main():
                     print(open(asm).read())
 
     print("\n%d passed, %d failed" % (passed, failed))
+    if args.ticks:
+        for opt in sorted(total_ticks):
+            print("%s: %d ticks" % (opt, total_ticks[opt]))
     return 1 if failed else 0
 
 

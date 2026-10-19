@@ -596,17 +596,19 @@ z80_print_operand (FILE *file, rtx x, int code)
     case SYMBOL_REF:
     case LABEL_REF:
     case CONST:
+      /* Low / high byte of an address: the assembler turns these into
+	 byte relocations (r_byte0 / r_byte1).  */
       if (code == 'L')
 	{
-	  fputs ("lo(", file);
+	  fputc ('(', file);
 	  output_addr_const (file, x);
-	  fputc (')', file);
+	  fputs (") & 255", file);
 	}
       else if (code == 'H')
 	{
-	  fputs ("hi(", file);
+	  fputc ('(', file);
 	  output_addr_const (file, x);
-	  fputc (')', file);
+	  fputs (") >> 8", file);
 	}
       else
 	output_addr_const (file, x);
@@ -1188,90 +1190,13 @@ z80_output_shift (enum rtx_code code, rtx *operands)
 /* Compare and branch                                                        */
 /* ------------------------------------------------------------------------- */
 
-/* Return the register that holds what was in REG after "ex de,hl".  */
-
-static rtx
-z80_swap_de_hl (rtx x)
-{
-  if (REG_P (x) && REGNO (x) == E_REG)
-    return gen_rtx_REG (HImode, L_REG);
-  if (REG_P (x) && REGNO (x) == L_REG)
-    return gen_rtx_REG (HImode, E_REG);
-  return x;
-}
-
-/* Output instructions that set the flags for HL - OP2 without changing
-   any register.  OP2 is a pair or a constant.
-
-   "add hl,rr" after "sbc hl,rr" restores HL without changing S, Z or
-   P/V, and sets C exactly when the subtraction borrowed, so afterwards
-   all flags still describe HL - OP2.  */
-
-static void
-z80_output_compare_hl (rtx op2)
-{
-  if (REG_P (op2) && REGNO (op2) == L_REG)
-    /* Comparing HL with itself: equal.  "cp a" gives Z=1, C=0, S=0, V=0.  */
-    output_asm_insn ("cp\ta", &op2);
-  else if (REG_P (op2))
-    output_asm_insn ("or\ta\n\tsbc\thl,%0\n\tadd\thl,%0", &op2);
-  else
-    output_asm_insn ("push\tde\n\tld\tde,%0\n\tor\ta\n\t"
-		     "sbc\thl,de\n\tadd\thl,de\n\tpop\tde", &op2);
-}
-
-/* Output instructions that set the flags for OP1 - OP2 (16-bit) without
-   changing any register.  OP1 is one of the pairs BC, DE, HL; OP2 a pair
-   or a constant.  Only HL can be compared directly, so other pairs are
-   swapped or copied into HL first ("ex", "push" and "pop" do not change
-   the flags).  */
-
-static void
-z80_output_compare_hi (rtx op1, rtx op2)
-{
-  if (REG_P (op2) && REGNO (op2) == REGNO (op1))
-    {
-      output_asm_insn ("cp\ta", &op2);
-      return;
-    }
-
-  switch (REGNO (op1))
-    {
-    case L_REG:
-      z80_output_compare_hl (op2);
-      break;
-
-    case E_REG:
-      output_asm_insn ("ex\tde,hl", &op1);
-      z80_output_compare_hl (z80_swap_de_hl (op2));
-      output_asm_insn ("ex\tde,hl", &op1);
-      break;
-
-    case C_REG:
-      if (REG_P (op2) && REGNO (op2) == L_REG)
-	output_asm_insn ("push\tde\n\tld\td,h\n\tld\te,l\n\tpush\thl\n\t"
-			 "ld\th,b\n\tld\tl,c\n\tor\ta\n\tsbc\thl,de\n\t"
-			 "pop\thl\n\tpop\tde", &op1);
-      else
-	{
-	  output_asm_insn ("push\thl\n\tld\th,b\n\tld\tl,c", &op1);
-	  z80_output_compare_hl (op2);
-	  output_asm_insn ("pop\thl", &op1);
-	}
-      break;
-
-    default:
-      gcc_unreachable ();
-    }
-}
-
 /* Output a compare-and-branch of operand 1 against zero, with the
    (already reversed if needed) condition CODE.
 
    8-bit: "or a" if the value is in A, otherwise "inc r / dec r", which
    leaves the register unchanged and sets Z and S from its value.
-   16-bit: the sign is bit 7 of the high byte; equality with zero needs
-   "ld a,h / or l", so the 16-bit zero-compare pattern clobbers A.
+   16-bit: the sign is bit 7 of the high byte; equality with zero is
+   "ld a,h / or l" (16-bit compare-and-branch insns clobber A).
 
    Only Z and S are valid afterwards, which is all a comparison with zero
    needs; unsigned comparisons with zero are always/never true or reduce
@@ -1345,11 +1270,61 @@ z80_output_cbranch_zero (enum rtx_code code, rtx *operands)
     }
 }
 
+/* Output a 16-bit compare-and-branch with condition CODE (already reversed
+   if needed), using A as scratch.  Operand 1 is a register pair, operand 2
+   a register pair or a constant, operand 3 the label.  */
+
+static const char *
+z80_output_cbranch_hi (enum rtx_code code, rtx *operands)
+{
+  rtx x = operands[1];
+  rtx y = operands[2];
+
+  if (y == const0_rtx)
+    return z80_output_cbranch_zero (code, operands);
+
+  if (code == EQ || code == NE)
+    {
+      if (REG_P (y) && REGNO (y) == REGNO (x))
+	return code == EQ ? "jp\t%l3" : "";
+      if (code == NE)
+	return ("ld\ta,%L1\n\tcp\t%L2\n\tjp\tnz,%l3\n\t"
+		"ld\ta,%H1\n\tcp\t%H2\n\tjp\tnz,%l3");
+      return ("ld\ta,%L1\n\tcp\t%L2\n\tjr\tnz,.Ls%=\n\t"
+	      "ld\ta,%H1\n\tcp\t%H2\n\tjp\tz,%l3\n.Ls%=:");
+    }
+
+  /* x > y is y < x, and so on: only LT, GE, LTU and GEU remain, which the
+     carry (unsigned) or sign and overflow (signed) of the 16-bit
+     subtraction decide.  */
+  bool swap = (code == GT || code == LE || code == GTU || code == LEU);
+  if (swap)
+    code = swap_condition (code);
+  rtx ops[4] = { NULL_RTX, swap ? y : x, swap ? x : y, operands[3] };
+  output_asm_insn ("ld\ta,%L1\n\tsub\t%L2\n\tld\ta,%H1\n\tsbc\ta,%H2", ops);
+
+  switch (code)
+    {
+    case LTU:
+      return "jp\tc,%l3";
+    case GEU:
+      return "jp\tnc,%l3";
+    case LT:
+      return ("jp\tpe,.Lo%=\n\tjp\tm,%l3\n\tjr\t.Ls%=\n"
+	      ".Lo%=:\n\tjp\tp,%l3\n.Ls%=:");
+    case GE:
+      return ("jp\tpe,.Lo%=\n\tjp\tp,%l3\n\tjr\t.Ls%=\n"
+	      ".Lo%=:\n\tjp\tm,%l3\n.Ls%=:");
+    default:
+      gcc_unreachable ();
+    }
+}
+
 /* Output a compare-and-branch.  Operand 0 is the comparison, operands 1 and
    2 the values compared and operand 3 the target label.  If REVERSED, the
    jump is taken when the comparison is false.
 
-   After "cp" (8-bit) or "sbc hl,rr" (16-bit) the flags are:
+   After "cp" (8-bit) or "sub / sbc a" (16-bit) the flags are:
      Z    equal
      C    unsigned less than (borrow)
      S^V  signed less than (sign, corrected by overflow)  */
@@ -1364,18 +1339,17 @@ z80_output_cbranch (rtx *operands, bool reversed)
   if (operands[2] == const0_rtx)
     return z80_output_cbranch_zero (code, operands);
 
-  if (GET_MODE (operands[1]) == QImode)
-    {
-      /* The flags survive the end of a (bc)/(de) redirection.  */
-      int base = z80_mem_redirect_base (operands[2]);
-      if (base >= 0)
-	z80_redirect_begin (base);
-      output_asm_insn ("cp\t%2", operands);
-      if (base >= 0)
-	z80_redirect_end ();
-    }
-  else
-    z80_output_compare_hi (operands[1], operands[2]);
+  if (GET_MODE (operands[1]) == HImode)
+    return z80_output_cbranch_hi (code, operands);
+
+  /* 8-bit: compare with A.  The flags survive the end of a (bc)/(de)
+     redirection.  */
+  int base = z80_mem_redirect_base (operands[2]);
+  if (base >= 0)
+    z80_redirect_begin (base);
+  output_asm_insn ("cp\t%2", operands);
+  if (base >= 0)
+    z80_redirect_end ();
 
   switch (code)
     {

@@ -207,10 +207,16 @@ def main():
                         help="optimisation level(s) to test, e.g. -O 0")
     parser.add_argument("--ticks", action="store_true",
                         help="report the total executed T-states per level")
+    parser.add_argument("--benchmark", action="store_true",
+                        help="run the tests listed in tests/benchmark.txt")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="print the generated assembly of failing tests")
     args = parser.parse_args()
 
+    if args.benchmark:
+        with open(os.path.join(TESTS, "benchmark.txt")) as f:
+            args.tests = [os.path.join(TESTS, line.strip()) for line in f
+                          if line.strip()]
     tests = args.tests or sorted(glob.glob(os.path.join(TESTS, "c", "*.c"))
                                  + glob.glob(os.path.join(TESTS, "cpp",
                                                           "*.cpp")))

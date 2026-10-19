@@ -966,6 +966,7 @@ z80_output_add_const (rtx reg, HOST_WIDE_INT val)
 
   if (val >= -4 && val <= 4)
     {
+      /* inc/dec rr; see below for SP.  */
       for (; val > 0; val--)
 	output_asm_insn ("inc\t%0", ops);
       for (; val < 0; val++)
@@ -987,7 +988,17 @@ z80_output_add_const (rtx reg, HOST_WIDE_INT val)
 		       "ld\tc,l\n\tpop\thl", ops);
       break;
     case SP_REG:
-      output_asm_insn ("ld\tiy,%1\n\tadd\tiy,sp\n\tld\tsp,iy", ops);
+      /* "inc sp" is one byte: up to 6 of them are shorter and faster than
+	 going through IY.  */
+      if (val >= -6 && val <= 6)
+	{
+	  for (; val > 0; val--)
+	    output_asm_insn ("inc\tsp", ops);
+	  for (; val < 0; val++)
+	    output_asm_insn ("dec\tsp", ops);
+	}
+      else
+	output_asm_insn ("ld\tiy,%1\n\tadd\tiy,sp\n\tld\tsp,iy", ops);
       break;
     default:
       gcc_unreachable ();
@@ -1181,6 +1192,27 @@ z80_output_shift (enum rtx_code code, rtx *operands)
       return "";
     }
 
+  /* Logical shifts of A by 3 or more: rotate and mask ("rrca" / "rlca"
+     are one byte, "srl a" / "sla a" two).  */
+  if (!hi && REGNO (dst) == A_REG && code != ASHIFTRT && count >= 3)
+    {
+      rtx ops[1] = { GEN_INT (code == LSHIFTRT ? 0xff >> count
+			      : (0xff << count) & 0xff) };
+      /* Rotating 8 - COUNT times the other way is shorter for large
+	 counts.  */
+      bool right = code == LSHIFTRT;
+      int n = count;
+      if (count > 4)
+	{
+	  right = !right;
+	  n = 8 - count;
+	}
+      for (int i = 0; i < n; i++)
+	output_asm_insn (right ? "rrca" : "rlca", ops);
+      output_asm_insn ("and\t%0", ops);
+      return "";
+    }
+
   for (; count > 0; count--)
     z80_output_shift1 (code, operands);
   return "";
@@ -1287,11 +1319,15 @@ z80_output_cbranch_hi (enum rtx_code code, rtx *operands)
     {
       if (REG_P (y) && REGNO (y) == REGNO (x))
 	return code == EQ ? "jp\t%l3" : "";
-      if (code == NE)
-	return ("ld\ta,%L1\n\tcp\t%L2\n\tjp\tnz,%l3\n\t"
-		"ld\ta,%H1\n\tcp\t%H2\n\tjp\tnz,%l3");
-      return ("ld\ta,%L1\n\tcp\t%L2\n\tjr\tnz,.Ls%=\n\t"
-	      "ld\ta,%H1\n\tcp\t%H2\n\tjp\tz,%l3\n.Ls%=:");
+      /* Compare a byte at a time; "or a" tests a byte against zero.  */
+      bool lo_zero = CONST_INT_P (y) && (INTVAL (y) & 0xff) == 0;
+      bool hi_zero = CONST_INT_P (y) && (INTVAL (y) & 0xff00) == 0;
+      output_asm_insn (lo_zero ? "ld\ta,%L1\n\tor\ta" : "ld\ta,%L1\n\tcp\t%L2",
+		       operands);
+      output_asm_insn (code == NE ? "jp\tnz,%l3" : "jr\tnz,.Ls%=", operands);
+      output_asm_insn (hi_zero ? "ld\ta,%H1\n\tor\ta" : "ld\ta,%H1\n\tcp\t%H2",
+		       operands);
+      return code == NE ? "jp\tnz,%l3" : "jp\tz,%l3\n.Ls%=:";
     }
 
   /* x > y is y < x, and so on: only LT, GE, LTU and GEU remain, which the

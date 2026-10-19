@@ -42,6 +42,7 @@
 #include "builtins.h"
 #include "function.h"
 #include "insn-attr.h"
+#include "predict.h"
 
 /* This file should be included last.  */
 #include "target-def.h"
@@ -1523,6 +1524,16 @@ z80_interrupt_save_mask (void)
   return mask;
 }
 
+/* Return true if the frame of the current function is set up and torn
+   down by the shared routines in libgcc (__z80_enter / __z80_leave):
+   smaller but slower, so only when optimizing for size.  */
+
+static bool
+z80_shared_frame_p (void)
+{
+  return optimize_function_for_size_p (cfun) && !z80_interrupt_function_p ();
+}
+
 void
 z80_expand_prologue (void)
 {
@@ -1539,6 +1550,12 @@ z80_expand_epilogue (void)
 {
   if (z80_naked_function_p ())
     return;
+  if (z80_frame_needed_p () && z80_shared_frame_p ())
+    {
+      /* jp __z80_leave: restores SP and IX and returns.  */
+      emit_jump_insn (gen_z80_return_leave ());
+      return;
+    }
   if (z80_frame_needed_p ())
     emit_insn (gen_z80_epilogue ());
   if (z80_interrupt_function_p ())
@@ -1637,7 +1654,10 @@ z80_output_prologue (rtx *operands)
 {
   HOST_WIDE_INT size = INTVAL (operands[0]);
 
-  output_asm_insn ("push\tix\n\tld\tix,0\n\tadd\tix,sp", operands);
+  if (z80_shared_frame_p ())
+    output_asm_insn ("call\t__z80_enter", operands);
+  else
+    output_asm_insn ("push\tix\n\tld\tix,0\n\tadd\tix,sp", operands);
   if (size > 0 && size <= 6)
     {
       for (; size >= 2; size -= 2)

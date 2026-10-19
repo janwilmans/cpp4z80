@@ -4,7 +4,7 @@
 # object, built from lib1funcs.S with L_<name> defined.
 LIB1ASMSRC = z80/lib1funcs.S
 LIB1ASMFUNCS = _mulhi3 _udivmodhi4 _divmodhi4 _mulsi3 _udivmodsi4 \
-	_divmodsi4 _shiftsi3 _bitopshi
+	_divmodsi4 _shiftsi3 _bitopshi _frame
 
 # No exception handling support (yet): leave out the unwinder.
 LIB2ADDEH =

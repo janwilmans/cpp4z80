@@ -585,3 +585,24 @@ ___clrsbhi2:
 	dec	hl
 	ret
 #endif /* L_bitopshi */
+
+#ifdef L_frame
+; ---------------------------------------------------------------------------
+; Shared prologue / epilogue, used by functions compiled for size:
+;   call __z80_enter   instead of   push ix / ld ix,0 / add ix,sp
+;   jp   __z80_leave   instead of   ld sp,ix / pop ix / ret
+; ---------------------------------------------------------------------------
+	.globl	__z80_enter
+__z80_enter:
+	ex	(sp),ix		; save the caller's IX; IX = our return address
+	push	ix
+	ld	ix,2
+	add	ix,sp		; IX points at the saved IX, as after the inline
+	ret			; prologue
+
+	.globl	__z80_leave
+__z80_leave:
+	ld	sp,ix
+	pop	ix
+	ret
+#endif /* L_frame */

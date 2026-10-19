@@ -127,8 +127,26 @@ or linker script.
 
 ## 3. Running it
 
-Copy `example.com` to an MSX-DOS disk (or disk image) and start it from the
-MSX-DOS prompt:
+### On the PC
+
+`scripts/run-com.py` runs a `.com` file in a Z80 emulator with a minimal
+emulated MSX-DOS. Console output and input go to your terminal, and the
+program's exit code becomes the exit status:
+
+```sh
+scripts/run-com.py example.com ONE TWO
+echo $?                                  # exit code (MSX-DOS 2 _TERM)
+printf '12 30\n' | scripts/run-com.py example.com   # input from a pipe
+```
+
+Only the console BDOS functions are emulated (no files, no BIOS), which is
+what the MSX-DOS environment of this toolchain uses. It is a quick way to
+try a program; it is not a full MSX emulator.
+
+### On an MSX or in openMSX
+
+Copy `example.com` to a disk (or disk image) that boots MSX-DOS and type
+its name (without `.COM`) at the prompt:
 
 ```
 A>EXAMPLE ONE TWO
@@ -137,8 +155,16 @@ argument 1: ONE
 argument 2: TWO
 ```
 
-With the openMSX emulator, a host directory can be used as disk drive,
-e.g. `openmsx -diska path/to/dir` with MSX-DOS on that disk.
+In the [openMSX](https://openmsx.org) emulator a host directory can be
+used as a disk: put the MSX-DOS system files (`MSXDOS2.SYS` and
+`COMMAND2.COM`, or `MSXDOS.SYS` and `COMMAND.COM`) and `example.com` in a
+directory and start a machine with a disk drive, for example:
+
+```sh
+openmsx -machine Panasonic_FS-A1GT -diska path/to/dir
+```
+
+The MSX-DOS system files are not part of openMSX or this project.
 
 ## 4. What the MSX-DOS environment provides
 
